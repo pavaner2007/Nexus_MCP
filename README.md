@@ -1,12 +1,14 @@
 # Semantic Engine Router
 
-> **SerpApi India Hackathon 2026 — Phase 4**
+> **SerpApi India Hackathon 2026 — Phase 6**
 
 ## What Is This?
 
 **Semantic Engine Router** is an MCP-native routing layer that sits between LLM agents and the SerpApi ecosystem. Instead of exposing 15–20 separate SerpApi engine tools to an LLM, this project exposes **one tool** (`Universal_Search`) and uses a lightweight embedding-based semantic classifier to route each natural-language query to the correct SerpApi engine internally (Google Shopping, Scholar, Local, Patents, or base Search).
 
 The classifier uses [`all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) (384-dimensional embeddings) to compute cosine similarity between an incoming query and pre-built per-category centroid vectors. Centroids are cached to disk on first run and reloaded instantly on subsequent server restarts.
+
+Every engine returns a **typed, validated `EngineResponse`** (Pydantic V2) so the schema is consistent whether you're calling a REST endpoint or using the MCP tool from Claude Desktop.
 
 ---
 
@@ -17,22 +19,28 @@ semantic-engine-router/
 ├── app/
 │   ├── config.py               # pydantic-settings env var loader
 │   ├── main.py                 # FastAPI app + all endpoints
+│   ├── schemas.py              # Shared EngineResult + EngineResponse Pydantic models (Phase 6)
 │   ├── classifier/
 │   │   ├── seed_data.py        # Seed phrases (5 categories × 45+ queries)
 │   │   ├── embedder.py         # Lazy-loading SentenceTransformer singleton
 │   │   ├── centroids.py        # Build / save / load centroid vectors (.npz)
 │   │   └── classify.py         # Cosine similarity scoring + classify_top()
 │   ├── engines/
-│   │   ├── shopping.py         # Google Shopping engine (Phase 3)
-│   │   └── scholar.py          # Google Scholar engine (Phase 4)
-│   └── mcp/                    # Placeholder — Phase 6 MCP server
+│   │   ├── adapters.py         # adapt_shopping_result() + adapt_scholar_result() (Phase 6)
+│   │   ├── shopping.py         # Google Shopping engine → EngineResponse
+│   │   └── scholar.py          # Google Scholar engine → EngineResponse
+│   └── mcp/
+│       ├── server.py           # FastMCP server — Universal_Search tool
+│       └── __main__.py         # Entry point: python -m app.mcp
 ├── tests/
 │   ├── conftest.py             # Injects dummy SERPAPI_KEY for test runs
 │   ├── test_health.py          # /health endpoint smoke test
 │   ├── test_seed_data.py       # Validates SEED_PHRASES structure
 │   ├── test_classifier.py      # Centroid shape, per-engine accuracy, /classify endpoint
+│   ├── test_adapters.py        # Pure unit tests for adapter functions (Phase 6)
 │   ├── test_shopping_engine.py # Shopping engine — mocked + live tests
-│   └── test_scholar_engine.py  # Scholar engine — mocked + live tests
+│   ├── test_scholar_engine.py  # Scholar engine — mocked + live tests
+│   └── test_mcp_handler.py     # Universal_Search routing, stubs, metadata injection
 ├── pytest.ini                  # Registers 'live' marker, suppresses warnings
 ├── .env.example
 ├── .gitignore
@@ -42,14 +50,56 @@ semantic-engine-router/
 
 ---
 
+## Shared Response Schema (Phase 6)
+
+All engines now return a validated **`EngineResponse`** Pydantic model. The shape is identical whether you call the REST API or use `Universal_Search` via MCP.
+
+### EngineResponse
+
+```json
+{
+  "success": true,
+  "engine": "shopping",
+  "result_count": 2,
+  "error": null,
+  "classified_as": "shopping",
+  "confidence": 0.82,
+  "results": [ ... ]
+}
+```
+
+> `classified_as` and `confidence` are `null` when calling engine endpoints directly. They are populated by the MCP router after classification.
+
+### EngineResult
+
+```json
+{
+  "title": "Apple iPhone 15 128GB",
+  "snippet": "$799.00 from Best Buy",
+  "link": "https://bestbuy.com/iphone15",
+  "thumbnail": "https://cdn.example.com/iphone15.jpg",
+  "metadata": {
+    "price": "$799.00",
+    "extracted_price": 799.0,
+    "source": "Best Buy",
+    "rating": 4.8,
+    "reviews": 1234
+  }
+}
+```
+
+Common fields (`title`, `snippet`, `link`, `thumbnail`) are always at the top level. Engine-specific extras (`price`, `authors`, `cited_by_count`, etc.) live in `metadata` so the envelope stays stable as new engines are added.
+
+---
+
 ## API Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET`  | `/health` | Liveness probe → `{"status": "ok"}` |
 | `POST` | `/classify` | Classify a query → per-engine scores + top-2 ranking |
-| `POST` | `/engines/shopping` | Query Google Shopping → trimmed product results |
-| `POST` | `/engines/scholar` | Query Google Scholar → trimmed paper results |
+| `POST` | `/engines/shopping` | Query Google Shopping → `EngineResponse` |
+| `POST` | `/engines/scholar` | Query Google Scholar → `EngineResponse` |
 
 ### POST /classify
 
@@ -78,9 +128,17 @@ semantic-engine-router/
   "success": true,
   "engine": "shopping",
   "result_count": 5,
+  "error": null,
+  "classified_as": null,
+  "confidence": null,
   "results": [
-    { "title": "Apple iPhone 15 Pro 256GB", "price": "$999.00", "extracted_price": 999.0,
-      "source": "Best Buy", "link": "https://...", "thumbnail": "https://...", "rating": 4.8, "reviews": 1234 }
+    {
+      "title": "Apple iPhone 15 Pro 256GB",
+      "snippet": "$999.00 from Best Buy",
+      "link": "https://...",
+      "thumbnail": "https://...",
+      "metadata": { "price": "$999.00", "extracted_price": 999.0, "source": "Best Buy", "rating": 4.8, "reviews": 1234 }
+    }
   ]
 }
 ```
@@ -97,24 +155,30 @@ semantic-engine-router/
   "success": true,
   "engine": "scholar",
   "result_count": 5,
+  "error": null,
+  "classified_as": null,
+  "confidence": null,
   "results": [
     {
       "title": "Attention Is All You Need",
-      "link": "https://arxiv.org/abs/1706.03762",
       "snippet": "The dominant sequence transduction models are based on complex recurrent...",
-      "authors": ["Ashish Vaswani", "Noam Shazeer", "Niki Parmar"],
-      "publication": "Advances in neural information processing systems, 2017",
-      "year": "2017",
-      "cited_by_count": 98765,
-      "pdf_link": "https://arxiv.org/pdf/1706.03762"
+      "link": "https://arxiv.org/abs/1706.03762",
+      "thumbnail": null,
+      "metadata": {
+        "authors": ["Ashish Vaswani", "Noam Shazeer", "Niki Parmar"],
+        "publication": "Advances in neural information processing systems, 2017",
+        "year": "2017",
+        "cited_by_count": 98765,
+        "pdf_link": "https://arxiv.org/pdf/1706.03762"
+      }
     }
   ]
 }
 ```
 
-All engine endpoints share the same error contract:
+**Error contract (all engines):**
 ```json
-{ "success": false, "engine": "scholar", "error": "<reason>" }
+{ "success": false, "engine": "scholar", "error": "<reason>", "results": [], "result_count": 0 }
 ```
 
 ---
@@ -207,9 +271,9 @@ Add the following to your `claude_desktop_config.json`
 After saving, restart Claude Desktop. The **Universal_Search** tool will appear in Claude's tool list.
 
 **Try asking Claude:**
-- *"What's the price of iPhone 15 Pro?"* → routes to Shopping
-- *"Recent papers on transformer attention mechanisms"* → routes to Scholar
-- *"Coffee shops near me"* → returns stub (Local engine — Phase 6)
+- *"What's the price of iPhone 15 Pro?"* → routes to Shopping → returns `EngineResponse` with price/source in metadata
+- *"Recent papers on transformer attention mechanisms"* → routes to Scholar → returns `EngineResponse` with authors/citations in metadata
+- *"Coffee shops near me"* → returns stub (Local engine — Phase 7)
 
 ---
 
@@ -218,7 +282,7 @@ After saving, restart Claude Desktop. The **Universal_Search** tool will appear 
 Tests inject a dummy `SERPAPI_KEY` automatically — **no `.env` file needed** for the fast suite:
 
 ```bash
-# Fast suite — fully mocked, no network/API key required (117 tests)
+# Fast suite — fully mocked, no network/API key required (147 tests)
 pytest -m "not live"
 
 # With stdout — shows ambiguous query classifier results
@@ -227,6 +291,18 @@ pytest -m "not live" -s
 # Live suite — requires real SERPAPI_KEY in .env, hits actual SerpApi APIs
 pytest -m live
 ```
+
+### Test Coverage by Module
+
+| Test File | Tests | What It Covers |
+|---|---|---|
+| `test_health.py` | 1 | `/health` liveness probe |
+| `test_seed_data.py` | 12 | SEED_PHRASES structure validation |
+| `test_classifier.py` | 16 | Centroid shape, scoring, `/classify` endpoint |
+| `test_adapters.py` | 34 | `adapt_shopping_result()` + `adapt_scholar_result()` pure unit tests |
+| `test_shopping_engine.py` | 38 | Shopping engine — trim, mock, endpoint, live |
+| `test_scholar_engine.py` | 30 | Scholar engine — trim, extract helpers, mock, endpoint, live |
+| `test_mcp_handler.py` | 16 | `Universal_Search` routing, stubs, metadata injection |
 
 ### Performance Benchmarks
 
@@ -248,8 +324,9 @@ pytest -m live
 | **3** ✅ | Google Shopping engine + `POST /engines/shopping` |
 | **4** ✅ | Google Scholar engine + `POST /engines/scholar` |
 | **5** ✅ | MCP server — `Universal_Search` tool, classifier → engine routing |
-| 6 | Local, Patents, Search engines |
-| 7 | Fallback + dual-engine merging |
+| **6** ✅ | Pydantic schema (`EngineResponse`/`EngineResult`) + adapter layer — 147 tests |
+| 7 | Local, Patents, Search engines |
+| 8 | Fallback + dual-engine merging |
 | … | Further phases |
 
 ---

@@ -26,6 +26,7 @@ from pydantic import BaseModel
 
 from app.config import settings  # noqa: F401  — validates SERPAPI_KEY at startup
 from app.classifier.centroids import load_centroids
+from app.engines.shopping import search_shopping
 from app.classifier.classify import classify, classify_top
 
 logging.basicConfig(
@@ -75,6 +76,11 @@ class ClassifyRequest(BaseModel):
     query: str
 
 
+class ShoppingRequest(BaseModel):
+    query: str
+    num_results: int = 10
+
+
 class ClassifyResponse(BaseModel):
     query: str
     scores: dict[str, float]
@@ -90,6 +96,18 @@ class ClassifyResponse(BaseModel):
 async def health_check() -> dict[str, str]:
     """Liveness probe — returns HTTP 200 when the service is up."""
     return {"status": "ok"}
+
+
+@app.post("/engines/shopping", tags=["Engines"])
+async def shopping_search(body: ShoppingRequest) -> dict:
+    """
+    Query the Google Shopping SerpApi engine and return trimmed product results.
+
+    * **success** — ``true`` if the call succeeded.
+    * **results** — list of trimmed product objects (title, price, source, link …).
+    * **error** — present only when ``success`` is ``false``.
+    """
+    return search_shopping(body.query, num_results=body.num_results)
 
 
 @app.post("/classify", response_model=ClassifyResponse, tags=["Classifier"])

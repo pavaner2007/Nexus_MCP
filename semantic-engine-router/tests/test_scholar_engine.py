@@ -203,24 +203,24 @@ class TestSearchScholarMocked:
 
         result = search_scholar("attention is all you need")
 
-        assert result["success"] is True
-        assert result["engine"] == "scholar"
-        assert result["result_count"] == 2
-        assert isinstance(result["results"], list)
-        assert len(result["results"]) == 2
+        assert result.success is True
+        assert result.engine == "scholar"
+        assert result.result_count == 2
+        assert isinstance(result.results, list)
+        assert len(result.results) == 2
 
     def test_success_nested_field_trimming(self, mocker):
         mocker.patch(MOCK_TARGET).return_value.get_dict.return_value = FAKE_SUCCESS_RESPONSE
 
         result = search_scholar("attention is all you need")
-        first = result["results"][0]
+        first = result.results[0]
 
-        assert first["title"] == "Attention Is All You Need"
-        assert "authors" in first
-        assert "Ashish Vaswani" in first["authors"]
-        assert first["cited_by_count"] == 98765
-        assert "pdf_link" in first
-        assert "result_id" not in first   # noise stripped
+        assert first.title == "Attention Is All You Need"
+        assert "authors" in first.metadata
+        assert "Ashish Vaswani" in first.metadata["authors"]
+        assert first.metadata["cited_by_count"] == 98765
+        assert "pdf_link" in first.metadata
+        assert "result_id" not in first.metadata   # noise stripped
 
     def test_correct_serpapi_params_sent(self, mocker):
         mock_gs = mocker.patch(MOCK_TARGET)
@@ -240,15 +240,18 @@ class TestSearchScholarMocked:
 
         result = search_scholar("anything")
 
-        assert result["success"] is False
-        assert result["engine"] == "scholar"
-        assert "Invalid API key" in result["error"]
+        assert result.success is False
+        assert result.engine == "scholar"
+        assert result.error is not None
+        assert "Invalid API key" in result.error
 
-    def test_api_error_has_no_results_key(self, mocker):
+    def test_api_error_results_is_empty_list(self, mocker):
+        """EngineResponse always has a results field; on error it must be empty."""
         mocker.patch(MOCK_TARGET).return_value.get_dict.return_value = FAKE_ERROR_RESPONSE
 
         result = search_scholar("anything")
-        assert "results" not in result
+        assert result.results == []
+        assert result.result_count == 0
 
     # ── (3) Empty / no results ───────────────────────────────────────────────
 
@@ -257,10 +260,10 @@ class TestSearchScholarMocked:
 
         result = search_scholar("extremely obscure paper xyzzy123")
 
-        assert result["success"] is True
-        assert result["engine"] == "scholar"
-        assert result["result_count"] == 0
-        assert result["results"] == []
+        assert result.success is True
+        assert result.engine == "scholar"
+        assert result.result_count == 0
+        assert result.results == []
 
     # ── Network / exception ──────────────────────────────────────────────────
 
@@ -269,9 +272,12 @@ class TestSearchScholarMocked:
 
         result = search_scholar("anything")
 
-        assert result["success"] is False
-        assert result["engine"] == "scholar"
-        assert "timed out or failed" in result["error"]
+        assert result.success is False
+        assert result.engine == "scholar"
+        assert result.error is not None
+        assert "timed out or failed" in result.error
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -331,29 +337,29 @@ class TestScholarLive:
         result = search_scholar(
             "attention is all you need transformer", num_results=5
         )
-        assert result["success"] is True, (
-            f"Live call failed: {result.get('error')}"
+        assert result.success is True, (
+            f"Live call failed: {result.error}"
         )
-        assert result["engine"] == "scholar"
-        assert result["result_count"] > 0
-        assert len(result["results"]) > 0
+        assert result.engine == "scholar"
+        assert result.result_count > 0
+        assert len(result.results) > 0
 
     def test_live_result_has_required_fields(self):
         result = search_scholar(
             "attention is all you need transformer", num_results=3
         )
-        assert result["success"] is True
+        assert result.success is True
 
-        for paper in result["results"]:
-            assert "title" in paper, f"Missing 'title' in paper: {paper}"
-            assert "link" in paper, f"Missing 'link' in paper: {paper}"
+        for paper in result.results:
+            assert paper.title, f"Missing title in paper: {paper}"
+            assert paper.link is not None, f"Missing link in paper: {paper}"
 
     def test_live_no_noise_fields(self):
         result = search_scholar("BERT language model", num_results=3)
-        assert result["success"] is True
+        assert result.success is True
 
-        for paper in result["results"]:
-            assert "result_id" not in paper
-            assert "type" not in paper
-            assert "inline_links" not in paper    # should be extracted, not raw
-            assert "publication_info" not in paper  # should be extracted, not raw
+        for paper in result.results:
+            assert "result_id" not in paper.metadata
+            assert "type" not in paper.metadata
+            assert "inline_links" not in paper.metadata
+            assert "publication_info" not in paper.metadata

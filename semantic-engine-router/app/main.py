@@ -29,6 +29,7 @@ from app.classifier.centroids import load_centroids
 from app.engines.shopping import search_shopping
 from app.engines.scholar import search_scholar
 from app.classifier.classify import classify, classify_top
+from app.schemas import EngineResponse
 
 logging.basicConfig(
     level=logging.INFO,
@@ -99,8 +100,8 @@ async def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/engines/shopping", tags=["Engines"])
-async def shopping_search(body: ShoppingRequest) -> dict:
+@app.post("/engines/shopping", response_model=EngineResponse, tags=["Engines"])
+async def shopping_search(body: ShoppingRequest) -> EngineResponse:
     """
     Query the Google Shopping SerpApi engine and return trimmed product results.
 
@@ -111,8 +112,8 @@ async def shopping_search(body: ShoppingRequest) -> dict:
     return search_shopping(body.query, num_results=body.num_results)
 
 
-@app.post("/engines/scholar", tags=["Engines"])
-async def scholar_search(body: ShoppingRequest) -> dict:
+@app.post("/engines/scholar", response_model=EngineResponse, tags=["Engines"])
+async def scholar_search(body: ShoppingRequest) -> EngineResponse:
     """
     Query the Google Scholar SerpApi engine and return trimmed paper results.
 

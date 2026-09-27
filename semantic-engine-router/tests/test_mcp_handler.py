@@ -19,6 +19,7 @@ import pytest
 # Import the tool function directly — FastMCP's @mcp.tool() decorator
 # returns the original function unchanged, so it's callable as a normal function.
 from app.mcp.server import universal_search
+from app.schemas import EngineResponse, EngineResult
 
 # ---------------------------------------------------------------------------
 # Mock targets (patch at the server module level so all calls are intercepted)
@@ -30,39 +31,54 @@ _SEARCH_SHOPPING = "app.mcp.server.search_shopping"
 _SEARCH_SCHOLAR  = "app.mcp.server.search_scholar"
 
 # ---------------------------------------------------------------------------
-# Shared fake data
+# Shared fake data — now EngineResponse objects (not raw dicts) so that
+# handler's `result.classified_as = ...` attribute setting works correctly.
 # ---------------------------------------------------------------------------
 
 FAKE_CENTROIDS = {"shopping": None, "scholar": None, "local": None, "patents": None, "search": None}
 
-FAKE_SHOPPING_RESULT = {
-    "success": True,
-    "engine": "shopping",
-    "result_count": 2,
-    "results": [
-        {"title": "iPhone 15 Pro", "price": "$999", "extracted_price": 999.0,
-         "source": "Apple", "link": "https://apple.com", "thumbnail": "https://cdn.example.com/img.jpg"},
-        {"title": "iPhone 15", "price": "$799", "extracted_price": 799.0,
-         "source": "Best Buy", "link": "https://bestbuy.com", "thumbnail": "https://cdn.example.com/img2.jpg"},
+FAKE_SHOPPING_RESULT = EngineResponse(
+    success=True,
+    engine="shopping",
+    result_count=2,
+    results=[
+        EngineResult(
+            title="iPhone 15 Pro",
+            snippet="$999 from Apple",
+            link="https://apple.com",
+            thumbnail="https://cdn.example.com/img.jpg",
+            metadata={"price": "$999", "extracted_price": 999.0, "source": "Apple"},
+        ),
+        EngineResult(
+            title="iPhone 15",
+            snippet="$799 from Best Buy",
+            link="https://bestbuy.com",
+            thumbnail="https://cdn.example.com/img2.jpg",
+            metadata={"price": "$799", "extracted_price": 799.0, "source": "Best Buy"},
+        ),
     ],
-}
+)
 
-FAKE_SCHOLAR_RESULT = {
-    "success": True,
-    "engine": "scholar",
-    "result_count": 1,
-    "results": [
-        {"title": "Attention Is All You Need", "link": "https://arxiv.org/abs/1706.03762",
-         "authors": ["Ashish Vaswani", "Noam Shazeer"],
-         "year": "2017", "cited_by_count": 98765},
+FAKE_SCHOLAR_RESULT = EngineResponse(
+    success=True,
+    engine="scholar",
+    result_count=1,
+    results=[
+        EngineResult(
+            title="Attention Is All You Need",
+            snippet="The dominant sequence transduction models...",
+            link="https://arxiv.org/abs/1706.03762",
+            metadata={"authors": ["Ashish Vaswani", "Noam Shazeer"], "year": "2017", "cited_by_count": 98765},
+        ),
     ],
-}
+)
 
-FAKE_ERROR_RESULT = {
-    "success": False,
-    "engine": "shopping",
-    "error": "Request to SerpApi timed out or failed",
-}
+FAKE_ERROR_RESULT = EngineResponse(
+    success=False,
+    engine="shopping",
+    error="Request to SerpApi timed out or failed",
+)
+
 
 
 # ---------------------------------------------------------------------------

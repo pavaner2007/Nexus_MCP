@@ -35,6 +35,8 @@ from typing import Any
 from serpapi import GoogleSearch
 
 from app.config import settings
+from app.schemas import EngineResponse
+from app.engines.adapters import adapt_scholar_result
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +136,7 @@ def _trim_paper(raw: dict[str, Any]) -> dict[str, Any]:
 def search_scholar(
     query: str,
     num_results: int = 10,
-) -> dict[str, Any]:
+) -> EngineResponse:
     """
     Query the Google Scholar SerpApi engine and return trimmed paper results.
 
@@ -179,38 +181,36 @@ def search_scholar(
         raw: dict[str, Any] = GoogleSearch(params).get_dict()
     except Exception as exc:  # noqa: BLE001 — catch-all for network/timeout errors
         logger.error("search_scholar: request failed — %s", exc)
-        return {
-            "success": False,
-            "engine": "scholar",
-            "error": "Request to SerpApi timed out or failed",
-        }
+        return EngineResponse(
+            success=False,
+            engine="scholar",
+            error="Request to SerpApi timed out or failed",
+        )
 
     # SerpApi surfaces API-level errors in the "error" key (not via exception).
     if "error" in raw:
         logger.warning("search_scholar: SerpApi returned an error — %s", raw["error"])
-        return {
-            "success": False,
-            "engine": "scholar",
-            "error": raw["error"],
-        }
+        return EngineResponse(
+            success=False,
+            engine="scholar",
+            error=raw["error"],
+        )
 
     organic_results: list[dict[str, Any]] = raw.get("organic_results", [])
 
     if not organic_results:
         logger.info("search_scholar: no results returned for %r", query)
-        return {
-            "success": True,
-            "engine": "scholar",
-            "result_count": 0,
-            "results": [],
-        }
+        return EngineResponse(
+            success=True,
+            engine="scholar",
+        )
 
-    trimmed = [_trim_paper(item) for item in organic_results]
-    logger.info("search_scholar: returning %d results for %r", len(trimmed), query)
+    results = [adapt_scholar_result(_trim_paper(item)) for item in organic_results]
+    logger.info("search_scholar: returning %d results for %r", len(results), query)
 
-    return {
-        "success": True,
-        "engine": "scholar",
-        "result_count": len(trimmed),
-        "results": trimmed,
-    }
+    return EngineResponse(
+        success=True,
+        engine="scholar",
+        result_count=len(results),
+        results=results,
+    )

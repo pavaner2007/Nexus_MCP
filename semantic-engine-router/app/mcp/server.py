@@ -33,6 +33,7 @@ from app.classifier.centroids import load_centroids
 from app.classifier.classify import classify_top
 from app.engines.shopping import search_shopping
 from app.engines.scholar import search_scholar
+from app.schemas import EngineResponse
 
 logger = logging.getLogger(__name__)
 
@@ -88,25 +89,24 @@ def universal_search(query: str) -> str:
     elif category == "scholar":
         result = search_scholar(query)
     elif category in _UNIMPLEMENTED:
-        return json.dumps({
-            "success": False,
-            "engine": category,
-            "error": "Engine not yet implemented",
-            "classified_as": category,
-            "confidence": score,
-        })
+        return EngineResponse(
+            success=False,
+            engine=category,
+            error="Engine not yet implemented",
+            classified_as=category,
+            confidence=score,
+        ).model_dump_json()
     else:
-        # Defensive fallback for any unknown category label
-        return json.dumps({
-            "success": False,
-            "engine": category,
-            "error": f"Unknown engine category: {category!r}",
-            "classified_as": category,
-            "confidence": score,
-        })
+        return EngineResponse(
+            success=False,
+            engine=category,
+            error=f"Unknown engine category: {category!r}",
+            classified_as=category,
+            confidence=score,
+        ).model_dump_json()
 
-    # Step 3 — inject classifier metadata into successful engine response
-    result["classified_as"] = category
-    result["confidence"] = score
+    # Step 3 — inject classifier metadata and serialise
+    result.classified_as = category
+    result.confidence = score
 
-    return json.dumps(result)
+    return result.model_dump_json()

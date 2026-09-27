@@ -121,43 +121,49 @@ class TestSearchShoppingMocked:
 
         result = search_shopping("iPhone 15", num_results=2)
 
-        assert result["success"] is True
-        assert result["engine"] == "shopping"
-        assert result["result_count"] == 2
-        assert isinstance(result["results"], list)
-        assert len(result["results"]) == 2
+        assert result.success is True
+        assert result.engine == "shopping"
+        assert result.result_count == 2
+        assert isinstance(result.results, list)
+        assert len(result.results) == 2
 
     def test_success_product_trimming(self, mocker):
-        """Raw extra fields must not appear in returned results."""
+        """Core fields in EngineResult attrs; engine extras in metadata; noise absent."""
         mock_gs = mocker.patch(MOCK_TARGET)
         mock_gs.return_value.get_dict.return_value = FAKE_SUCCESS_RESPONSE
 
         result = search_shopping("iPhone 15")
-        first = result["results"][0]
+        first = result.results[0]
 
-        # Required fields present
-        for field in EXPECTED_FIELDS_ALWAYS:
-            assert field in first, f"Field '{field}' missing from trimmed product"
+        # Top-level EngineResult fields
+        assert first.title
+        assert first.link is not None
+        assert first.thumbnail is not None
+        assert first.snippet is not None   # synthesised from price + source
 
-        # Noise fields stripped
-        assert "serpapi_link" not in first
-        assert "position" not in first
+        # Engine-specific extras in metadata
+        for field in ("price", "extracted_price", "source"):
+            assert field in first.metadata, f"'{field}' missing from metadata"
+
+        # Noise fields absent everywhere
+        assert "serpapi_link" not in first.metadata
+        assert "position" not in first.metadata
 
     def test_success_optional_fields_present_when_available(self, mocker):
         mocker.patch(MOCK_TARGET).return_value.get_dict.return_value = FAKE_SUCCESS_RESPONSE
 
         result = search_shopping("iPhone 15")
-        first = result["results"][0]
-        assert "rating" in first
-        assert "reviews" in first
+        first = result.results[0]
+        assert "rating" in first.metadata
+        assert "reviews" in first.metadata
 
     def test_success_optional_fields_absent_when_missing(self, mocker):
         mocker.patch(MOCK_TARGET).return_value.get_dict.return_value = FAKE_SUCCESS_RESPONSE
 
         result = search_shopping("iPhone 15")
-        second = result["results"][1]
-        assert "rating" not in second
-        assert "reviews" not in second
+        second = result.results[1]
+        assert "rating" not in second.metadata
+        assert "reviews" not in second.metadata
 
     def test_correct_serpapi_params_sent(self, mocker):
         """Verify engine=google_shopping and gl=in are passed to SerpApi."""
@@ -179,17 +185,18 @@ class TestSearchShoppingMocked:
 
         result = search_shopping("iPhone 15")
 
-        assert result["success"] is False
-        assert result["engine"] == "shopping"
-        assert "error" in result
-        assert "Invalid API key" in result["error"]
+        assert result.success is False
+        assert result.engine == "shopping"
+        assert result.error is not None
+        assert "Invalid API key" in result.error
 
-    def test_api_error_no_results_key(self, mocker):
-        """Error responses must not have a 'results' key."""
+    def test_api_error_results_is_empty_list(self, mocker):
+        """EngineResponse always has a results field; on error it must be empty."""
         mocker.patch(MOCK_TARGET).return_value.get_dict.return_value = FAKE_ERROR_RESPONSE
 
         result = search_shopping("iPhone 15")
-        assert "results" not in result
+        assert result.results == []
+        assert result.result_count == 0
 
     # ── (3) Empty / no results ───────────────────────────────────────────────
 
@@ -198,10 +205,10 @@ class TestSearchShoppingMocked:
 
         result = search_shopping("extremely obscure product xyz123")
 
-        assert result["success"] is True
-        assert result["engine"] == "shopping"
-        assert result["result_count"] == 0
-        assert result["results"] == []
+        assert result.success is True
+        assert result.engine == "shopping"
+        assert result.result_count == 0
+        assert result.results == []
 
     # ── Network / exception ──────────────────────────────────────────────────
 
@@ -211,10 +218,12 @@ class TestSearchShoppingMocked:
 
         result = search_shopping("iPhone 15")
 
-        assert result["success"] is False
-        assert result["engine"] == "shopping"
-        assert "error" in result
-        assert "timed out or failed" in result["error"]
+        assert result.success is False
+        assert result.engine == "shopping"
+        assert result.error is not None
+        assert "timed out or failed" in result.error
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -275,26 +284,25 @@ class TestShoppingLive:
     def test_iphone_15_returns_results(self):
         result = search_shopping("iPhone 15", num_results=5)
 
-        assert result["success"] is True, (
-            f"Live call failed: {result.get('error')}"
+        assert result.success is True, (
+            f"Live call failed: {result.error}"
         )
-        assert result["engine"] == "shopping"
-        assert result["result_count"] > 0
-        assert len(result["results"]) > 0
+        assert result.engine == "shopping"
+        assert result.result_count > 0
+        assert len(result.results) > 0
 
     def test_live_result_has_expected_fields(self):
         result = search_shopping("iPhone 15", num_results=3)
-        assert result["success"] is True
+        assert result.success is True
 
-        for product in result["results"]:
-            # title and link must always be present in real Shopping results
-            assert "title" in product, f"Missing 'title' in product: {product}"
-            assert "link" in product, f"Missing 'link' in product: {product}"
+        for product in result.results:
+            assert product.title, f"Missing title in product: {product}"
+            assert product.link is not None, f"Missing link in product: {product}"
 
     def test_live_no_raw_serpapi_noise_fields(self):
         result = search_shopping("Samsung Galaxy S24", num_results=3)
-        assert result["success"] is True
+        assert result.success is True
 
-        for product in result["results"]:
-            assert "serpapi_link" not in product
-            assert "position" not in product
+        for product in result.results:
+            assert "serpapi_link" not in product.metadata
+            assert "position" not in product.metadata

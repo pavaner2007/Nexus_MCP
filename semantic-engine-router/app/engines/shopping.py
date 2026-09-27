@@ -27,6 +27,8 @@ from typing import Any
 from serpapi import GoogleSearch
 
 from app.config import settings
+from app.schemas import EngineResponse
+from app.engines.adapters import adapt_shopping_result
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +53,7 @@ def _trim_product(raw: dict[str, Any]) -> dict[str, Any]:
 def search_shopping(
     query: str,
     num_results: int = 10,
-) -> dict[str, Any]:
+) -> EngineResponse:
     """
     Query the Google Shopping SerpApi engine and return trimmed results.
 
@@ -97,39 +99,37 @@ def search_shopping(
         raw: dict[str, Any] = GoogleSearch(params).get_dict()
     except Exception as exc:  # noqa: BLE001 — catch-all for network/timeout errors
         logger.error("search_shopping: request failed — %s", exc)
-        return {
-            "success": False,
-            "engine": "shopping",
-            "error": "Request to SerpApi timed out or failed",
-        }
+        return EngineResponse(
+            success=False,
+            engine="shopping",
+            error="Request to SerpApi timed out or failed",
+        )
 
     # SerpApi surfaces API-level errors (bad key, quota exceeded, etc.) in
     # the "error" key of the response dict rather than raising an exception.
     if "error" in raw:
         logger.warning("search_shopping: SerpApi returned an error — %s", raw["error"])
-        return {
-            "success": False,
-            "engine": "shopping",
-            "error": raw["error"],
-        }
+        return EngineResponse(
+            success=False,
+            engine="shopping",
+            error=raw["error"],
+        )
 
     shopping_results: list[dict[str, Any]] = raw.get("shopping_results", [])
 
     if not shopping_results:
         logger.info("search_shopping: no results returned for %r", query)
-        return {
-            "success": True,
-            "engine": "shopping",
-            "result_count": 0,
-            "results": [],
-        }
+        return EngineResponse(
+            success=True,
+            engine="shopping",
+        )
 
-    trimmed = [_trim_product(item) for item in shopping_results]
-    logger.info("search_shopping: returning %d results for %r", len(trimmed), query)
+    results = [adapt_shopping_result(_trim_product(item)) for item in shopping_results]
+    logger.info("search_shopping: returning %d results for %r", len(results), query)
 
-    return {
-        "success": True,
-        "engine": "shopping",
-        "result_count": len(trimmed),
-        "results": trimmed,
-    }
+    return EngineResponse(
+        success=True,
+        engine="shopping",
+        result_count=len(results),
+        results=results,
+    )

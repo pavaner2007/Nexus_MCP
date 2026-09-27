@@ -320,20 +320,20 @@ SEED_PHRASES: dict[str, list[str]] = {
 #  in Phase 3+.                                                                #
 # --------------------------------------------------------------------------- #
 AMBIGUOUS_TEST_QUERIES: list[str] = [
-    # shopping ↔ scholar
-    "compare iPhone 15 prices with recent expert reviews and published benchmarks",
-    # scholar ↔ search
+    # scholar <-> search  (peer-reviewed framing vs. general knowledge query)
     "what does the latest peer-reviewed research say about social media addiction",
-    # patents ↔ scholar
+    # patents <-> scholar  (prior art search + published literature)
     "published papers and patent filings on solid-state battery electrolyte design",
-    # local ↔ search
+    # local <-> search  (location + general info, no purchase intent)
     "what are the best hospitals in Boston — including ratings and visiting hours",
-    # shopping ↔ local
-    "find the nearest Apple Store and check the price of MacBook Pro M3 there",
-    # scholar ↔ patents
+    # scholar <-> patents  (research + IP overlap)
     "who invented CRISPR — research papers and patent ownership landscape",
-    # shopping ↔ search
-    "is the new Pixel 8 worth buying — price and general reviews",
-    # local ↔ patents
-    "which biotech companies near San Diego hold patents on mRNA therapeutics",
+    # shopping <-> scholar  (product decision framed as academic comparison)
+    "academic performance benchmarks and market pricing analysis of the M3 MacBook Pro",
+    # local <-> shopping  (location + price equally weighted)
+    "Tesla showroom locations near me and current lease pricing for the Model 3",
+    # search <-> shopping  (general curiosity + buy intent balanced)
+    "explain the differences between OLED and QLED TVs and which one is worth buying",
+    # patents <-> scholar  (prior art framed with university research context)
+    "prior art for mRNA vaccine delivery systems developed at US research universities",
 ]

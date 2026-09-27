@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from app.config import settings  # noqa: F401  — validates SERPAPI_KEY at startup
 from app.classifier.centroids import load_centroids
 from app.engines.shopping import search_shopping
+from app.engines.scholar import search_scholar
 from app.classifier.classify import classify, classify_top
 
 logging.basicConfig(
@@ -108,6 +109,18 @@ async def shopping_search(body: ShoppingRequest) -> dict:
     * **error** — present only when ``success`` is ``false``.
     """
     return search_shopping(body.query, num_results=body.num_results)
+
+
+@app.post("/engines/scholar", tags=["Engines"])
+async def scholar_search(body: ShoppingRequest) -> dict:
+    """
+    Query the Google Scholar SerpApi engine and return trimmed paper results.
+
+    * **success** — ``true`` if the call succeeded.
+    * **results** — list of trimmed paper objects (title, authors, year, cited_by_count …).
+    * **error** — present only when ``success`` is ``false``.
+    """
+    return search_scholar(body.query, num_results=body.num_results)
 
 
 @app.post("/classify", response_model=ClassifyResponse, tags=["Classifier"])

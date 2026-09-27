@@ -169,12 +169,56 @@ On first startup, centroids are built and cached to `app/classifier/centroids.np
 
 ---
 
+## Running the MCP Server
+
+Start the MCP server directly (used by Claude Desktop / Cursor):
+
+```bash
+python -m app.mcp
+```
+
+> Make sure your `.env` file has a real `SERPAPI_KEY` before running. The server loads it automatically via `python-dotenv`.
+
+---
+
+## Connecting to Claude Desktop
+
+Add the following to your `claude_desktop_config.json`  
+(usually at `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
+
+```json
+{
+  "mcpServers": {
+    "semantic-engine-router": {
+      "command": "C:\\path\\to\\semantic-engine-router\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "app.mcp"],
+      "cwd": "C:\\path\\to\\semantic-engine-router",
+      "env": {
+        "SERPAPI_KEY": "your_actual_serpapi_key_here"
+      }
+    }
+  }
+}
+```
+
+> **Replace** `C:\\path\\to\\semantic-engine-router` with the actual absolute path to your `semantic-engine-router` directory.  
+> **Replace** `your_actual_serpapi_key_here` with your real SerpApi key.
+
+After saving, restart Claude Desktop. The **Universal_Search** tool will appear in Claude's tool list.
+
+**Try asking Claude:**
+- *"What's the price of iPhone 15 Pro?"* → routes to Shopping
+- *"Recent papers on transformer attention mechanisms"* → routes to Scholar
+- *"Coffee shops near me"* → returns stub (Local engine — Phase 6)
+
+---
+
 ## Running Tests
 
 Tests inject a dummy `SERPAPI_KEY` automatically — **no `.env` file needed** for the fast suite:
 
 ```bash
-# Fast suite — fully mocked, no network/API key required (101 tests)
+# Fast suite — fully mocked, no network/API key required (117 tests)
 pytest -m "not live"
 
 # With stdout — shows ambiguous query classifier results
@@ -184,10 +228,11 @@ pytest -m "not live" -s
 pytest -m live
 ```
 
-### Performance (Phase 2 benchmarks)
+### Performance Benchmarks
 
 | Metric | Result |
 |--------|--------|
+| `universal_search()` end-to-end (cached centroids) | ~15 ms classify + engine latency |
 | `classify()` warm latency | ~13 ms per query |
 | Centroid build (cold start) | ~58 s (model download + encode) |
 | Centroid load (cached) | < 1 s |
@@ -202,9 +247,9 @@ pytest -m live
 | **2** ✅ | Embedding classifier — centroid scoring + `POST /classify` |
 | **3** ✅ | Google Shopping engine + `POST /engines/shopping` |
 | **4** ✅ | Google Scholar engine + `POST /engines/scholar` |
-| 5 | Local, Patents, Search engines (same pattern) |
-| 6 | `Universal_Search` routing — classifier → engine dispatch |
-| 7 | MCP server wiring |
+| **5** ✅ | MCP server — `Universal_Search` tool, classifier → engine routing |
+| 6 | Local, Patents, Search engines |
+| 7 | Fallback + dual-engine merging |
 | … | Further phases |
 
 ---

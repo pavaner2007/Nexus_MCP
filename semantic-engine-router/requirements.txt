@@ -1,9 +1,10 @@
-fastapi==0.115.5
-uvicorn[standard]==0.32.1
-pydantic-settings==2.6.1
-python-dotenv==1.0.1
-pytest==8.3.3
-httpx==0.27.2
+fastapi
+uvicorn[standard]
+pydantic-settings>=2.6.1
+python-dotenv>=1.0.1
+pytest>=8.3.3
+httpx
 sentence-transformers>=3.0.0
 google-search-results>=2.4.2
 pytest-mock>=3.14.0
+mcp>=1.0.0,<2.0.0

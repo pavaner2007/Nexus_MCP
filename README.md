@@ -1,6 +1,6 @@
 # Semantic Engine Router
 
-> **SerpApi India Hackathon 2026 — Phase 6**
+> **SerpApi India Hackathon 2026 — Phase 8**
 
 ## What Is This?
 
@@ -19,16 +19,20 @@ semantic-engine-router/
 ├── app/
 │   ├── config.py               # pydantic-settings env var loader
 │   ├── main.py                 # FastAPI app + all endpoints
-│   ├── schemas.py              # Shared EngineResult + EngineResponse Pydantic models (Phase 6)
+│   ├── schemas.py              # Shared EngineResult + EngineResponse Pydantic models
 │   ├── classifier/
 │   │   ├── seed_data.py        # Seed phrases (5 categories × 45+ queries)
 │   │   ├── embedder.py         # Lazy-loading SentenceTransformer singleton
 │   │   ├── centroids.py        # Build / save / load centroid vectors (.npz)
 │   │   └── classify.py         # Cosine similarity scoring + classify_top()
 │   ├── engines/
-│   │   ├── adapters.py         # adapt_shopping_result() + adapt_scholar_result() (Phase 6)
+│   │   ├── adapters.py         # adapt_*_result() — one per engine
 │   │   ├── shopping.py         # Google Shopping engine → EngineResponse
-│   │   └── scholar.py          # Google Scholar engine → EngineResponse
+│   │   ├── scholar.py          # Google Scholar engine → EngineResponse
+│   │   ├── local.py            # Google Local engine → EngineResponse
+│   │   └── patents.py          # Google Patents engine → EngineResponse
+│   ├── routing/
+│   │   └── router.py           # decide_route() + async execute_route()
 │   └── mcp/
 │       ├── server.py           # FastMCP server — Universal_Search tool
 │       └── __main__.py         # Entry point: python -m app.mcp
@@ -37,10 +41,13 @@ semantic-engine-router/
 │   ├── test_health.py          # /health endpoint smoke test
 │   ├── test_seed_data.py       # Validates SEED_PHRASES structure
 │   ├── test_classifier.py      # Centroid shape, per-engine accuracy, /classify endpoint
-│   ├── test_adapters.py        # Pure unit tests for adapter functions (Phase 6)
+│   ├── test_adapters.py        # Pure unit tests for all 4 adapter functions
 │   ├── test_shopping_engine.py # Shopping engine — mocked + live tests
 │   ├── test_scholar_engine.py  # Scholar engine — mocked + live tests
-│   └── test_mcp_handler.py     # Universal_Search routing, stubs, metadata injection
+│   ├── test_local_engine.py    # Local engine — mocked + live tests
+│   ├── test_patents_engine.py  # Patents engine — mocked + live tests
+│   ├── test_router.py          # decide_route + execute_route (single/dual/partial-fail)
+│   └── test_mcp_handler.py     # Universal_Search routing, dual mode, metadata injection
 ├── pytest.ini                  # Registers 'live' marker, suppresses warnings
 ├── .env.example
 ├── .gitignore
@@ -64,11 +71,12 @@ All engines now return a validated **`EngineResponse`** Pydantic model. The shap
   "error": null,
   "classified_as": "shopping",
   "confidence": 0.82,
+  "route_detail": null,
   "results": [ ... ]
 }
 ```
 
-> `classified_as` and `confidence` are `null` when calling engine endpoints directly. They are populated by the MCP router after classification.
+> `classified_as`, `confidence`, and `route_detail` are `null` when calling engine endpoints directly. They are populated by the MCP router after classification. In dual-engine mode `route_detail` carries per-engine scores and any partial failure notes.
 
 ### EngineResult
 
@@ -100,6 +108,8 @@ Common fields (`title`, `snippet`, `link`, `thumbnail`) are always at the top le
 | `POST` | `/classify` | Classify a query → per-engine scores + top-2 ranking |
 | `POST` | `/engines/shopping` | Query Google Shopping → `EngineResponse` |
 | `POST` | `/engines/scholar` | Query Google Scholar → `EngineResponse` |
+| `POST` | `/engines/local` | Query Google Local → `EngineResponse` |
+| `POST` | `/engines/patents` | Query Google Patents → `EngineResponse` |
 
 ### POST /classify
 
@@ -270,10 +280,44 @@ Add the following to your `claude_desktop_config.json`
 
 After saving, restart Claude Desktop. The **Universal_Search** tool will appear in Claude's tool list.
 
+---
+
+## Dual-Engine Routing (Phase 8)
+
+When the top-2 classifier scores are within **0.15** of each other, both engines are queried **concurrently** via `asyncio.gather` and their results are merged:
+
+```
+Universal_Search("Tesla showroom locations near me and current lease pricing")
+→ classify_top → [("local", 0.445), ("shopping", 0.377)]  gap=0.068 ≤ 0.15
+→ DUAL route: asyncio.gather(search_local(...), search_shopping(...))
+→ EngineResponse(
+      engine="dual:local+shopping",
+      result_count=12,
+      classified_as="dual",
+      confidence=0.411,
+      route_detail={"local": 0.445, "shopping": 0.377},
+      results=[
+          {..., metadata: {"source_engine": "local"}},    # showroom locations
+          {..., metadata: {"source_engine": "shopping"}},  # lease pricing
+      ]
+  )
+```
+
+| Query | Mode | Engines | Gap |
+|---|---|---|---|
+| "hospitals in Boston ratings + hours" | **DUAL** | local + shopping | 0.145 |
+| "Tesla showroom + lease pricing" | **DUAL** | local + shopping | 0.068 |
+| "mRNA vaccine prior art universities" | **DUAL** | patents + scholar | 0.057 |
+| "social media addiction research" | **DUAL** | scholar + search | 0.098 |
+| "CRISPR patents and research" | single | patents | 0.254 |
+| "M3 MacBook Pro performance + price" | single | shopping | 0.323 |
+
 **Try asking Claude:**
-- *"What's the price of iPhone 15 Pro?"* → routes to Shopping → returns `EngineResponse` with price/source in metadata
-- *"Recent papers on transformer attention mechanisms"* → routes to Scholar → returns `EngineResponse` with authors/citations in metadata
-- *"Coffee shops near me"* → returns stub (Local engine — Phase 7)
+- *"What's the price of iPhone 15 Pro?"* → single → Shopping
+- *"Recent papers on transformer attention"* → single → Scholar
+- *"Coffee shops near me"* → single → Local
+- *"Tesla showroom locations and lease deals"* → **dual** → Local + Shopping
+- *"Prior art for mRNA vaccine delivery at US universities"* → **dual** → Patents + Scholar
 
 ---
 
@@ -282,10 +326,10 @@ After saving, restart Claude Desktop. The **Universal_Search** tool will appear 
 Tests inject a dummy `SERPAPI_KEY` automatically — **no `.env` file needed** for the fast suite:
 
 ```bash
-# Fast suite — fully mocked, no network/API key required (147 tests)
+# Fast suite — fully mocked, no network/API key required (235 tests)
 pytest -m "not live"
 
-# With stdout — shows ambiguous query classifier results
+# With stdout — shows ambiguous query dual-route diagnostic
 pytest -m "not live" -s
 
 # Live suite — requires real SERPAPI_KEY in .env, hits actual SerpApi APIs
@@ -299,10 +343,13 @@ pytest -m live
 | `test_health.py` | 1 | `/health` liveness probe |
 | `test_seed_data.py` | 12 | SEED_PHRASES structure validation |
 | `test_classifier.py` | 16 | Centroid shape, scoring, `/classify` endpoint |
-| `test_adapters.py` | 34 | `adapt_shopping_result()` + `adapt_scholar_result()` pure unit tests |
-| `test_shopping_engine.py` | 38 | Shopping engine — trim, mock, endpoint, live |
-| `test_scholar_engine.py` | 30 | Scholar engine — trim, extract helpers, mock, endpoint, live |
-| `test_mcp_handler.py` | 16 | `Universal_Search` routing, stubs, metadata injection |
+| `test_adapters.py` | 66 | All 4 adapter functions — pure unit tests |
+| `test_shopping_engine.py` | 16 | Shopping engine — trim, mock, endpoint, live |
+| `test_scholar_engine.py` | 27 | Scholar engine — trim, extract helpers, mock, endpoint, live |
+| `test_local_engine.py` | 20 | Local engine — trim, mock, endpoint, live |
+| `test_patents_engine.py` | 21 | Patents engine — trim, mock, endpoint, live |
+| `test_router.py` | 24 | `decide_route` threshold logic, `execute_route` single/dual/partial-fail |
+| `test_mcp_handler.py` | 12 | `Universal_Search` single + dual routing, metadata injection |
 
 ### Performance Benchmarks
 
@@ -324,9 +371,10 @@ pytest -m live
 | **3** ✅ | Google Shopping engine + `POST /engines/shopping` |
 | **4** ✅ | Google Scholar engine + `POST /engines/scholar` |
 | **5** ✅ | MCP server — `Universal_Search` tool, classifier → engine routing |
-| **6** ✅ | Pydantic schema (`EngineResponse`/`EngineResult`) + adapter layer — 147 tests |
-| 7 | Local, Patents, Search engines |
-| 8 | Fallback + dual-engine merging |
+| **6** ✅ | Pydantic schema (`EngineResponse`/`EngineResult`) + adapter layer |
+| **7** ✅ | Local + Patents engines + `POST /engines/local` + `POST /engines/patents` |
+| **8** ✅ | Dual-engine routing — `decide_route()` + `async execute_route()` — 235 tests |
+| 9 | Fallback to base Google Search when all engines score low |
 | … | Further phases |
 
 ---

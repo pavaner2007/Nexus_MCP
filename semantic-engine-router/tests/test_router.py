@@ -7,12 +7,13 @@ All engine calls are mocked — no real SerpApi or model calls.
 
 Test groups
 -----------
-a. decide_route() — threshold logic
+a. decide_route() — threshold logic (single, dual, fallback)
 b. execute_route() — single mode
 c. execute_route() — dual mode: happy path, source_engine injection,
    partial failure (one engine raises), partial failure (one stub)
-d. Diagnostic: run AMBIGUOUS_TEST_QUERIES through classify_top + decide_route
-   and print how many trigger dual mode.
+d. execute_route() — fallback mode
+e. Diagnostic: run AMBIGUOUS_TEST_QUERIES through classify_top + decide_route
+   and print how many trigger dual/fallback.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ import pytest
 
 from app.routing.router import (
     DUAL_ROUTE_THRESHOLD,
+    MIN_CONFIDENCE_THRESHOLD,
     decide_route,
     execute_route,
     ENGINE_MAP,
@@ -119,6 +121,42 @@ class TestDecideRoute:
         assert decision["mode"] == "dual"
         assert decision["categories"] == ["patents", "local"]
 
+    # ── Fallback tests (Phase 9) ─────────────────────────────────────────────
+
+    def test_fallback_when_top_score_below_threshold(self):
+        """Top score below MIN_CONFIDENCE_THRESHOLD → fallback, even with close gap."""
+        scores = [("shopping", 0.25), ("scholar", 0.20)]
+        decision = decide_route(scores)
+        assert decision["mode"] == "fallback"
+        assert decision["categories"] == ["search"]
+
+    def test_fallback_takes_priority_over_dual(self):
+        """Small gap but low score → fallback wins (not dual)."""
+        # gap = 0.03 ≤ 0.15, but top score 0.28 < 0.35 → fallback
+        scores = [("shopping", 0.28), ("scholar", 0.25)]
+        assert 0.28 - 0.25 <= DUAL_ROUTE_THRESHOLD  # would be dual if confident
+        decision = decide_route(scores)
+        assert decision["mode"] == "fallback"
+
+    def test_fallback_not_triggered_at_exactly_threshold(self):
+        """Score == MIN_CONFIDENCE_THRESHOLD is NOT fallback (strict less-than)."""
+        scores = [("shopping", MIN_CONFIDENCE_THRESHOLD), ("scholar", 0.10)]
+        decision = decide_route(scores)
+        assert decision["mode"] != "fallback"
+
+    def test_fallback_not_triggered_above_threshold(self):
+        """Score clearly above threshold → normal routing."""
+        scores = [("shopping", 0.50), ("scholar", 0.10)]
+        decision = decide_route(scores)
+        assert decision["mode"] == "single"
+
+    def test_fallback_scores_carried_forward(self):
+        """Original scores are preserved in the fallback decision dict."""
+        scores = [("shopping", 0.20), ("search", 0.15)]
+        decision = decide_route(scores)
+        assert decision["mode"] == "fallback"
+        assert decision["scores"] is scores
+
 
 # ---------------------------------------------------------------------------
 # (b) execute_route — single mode
@@ -157,19 +195,64 @@ class TestExecuteRouteSingle:
 
         assert abs(result.confidence - 0.82) < 1e-6
 
-    def test_single_returns_stub_for_unmapped_engine(self):
-        """'search' maps to None → stub response, no engine call."""
-        decision = {"mode": "single", "categories": ["search"],
-                    "scores": [("search", 0.55)]}
-        result = run(execute_route("latest news", decision))
-
-        assert result.success is False
-        assert result.engine == "search"
-        assert "not yet implemented" in result.error
+    def test_single_search_is_now_real_engine(self):
+        """Phase 9: 'search' is no longer None in ENGINE_MAP \u2014 it maps to search_fallback."""
+        assert ENGINE_MAP.get("search") is not None
+        assert callable(ENGINE_MAP["search"])
 
 
 # ---------------------------------------------------------------------------
-# (c) execute_route — dual mode: happy path
+# (c) execute_route — fallback mode (Phase 9)
+# ---------------------------------------------------------------------------
+
+
+class TestExecuteRouteFallback:
+    def _fallback_decision(self):
+        return {
+            "mode": "fallback",
+            "categories": ["search"],
+            "scores": [("shopping", 0.25), ("scholar", 0.20)],
+        }
+
+    def test_fallback_calls_search_fallback(self, mocker):
+        """execute_route in fallback mode must call search_fallback."""
+        fake = _make_engine_response("search", n=3)
+        mocker.patch(f"{_ROUTER_PREFIX}.asyncio.to_thread", return_value=fake)
+        result = run(execute_route("who is the president", self._fallback_decision()))
+        assert result.success is True
+
+    def test_fallback_classified_as_search_fallback(self, mocker):
+        fake = _make_engine_response("search", n=2)
+        mocker.patch(f"{_ROUTER_PREFIX}.asyncio.to_thread", return_value=fake)
+        result = run(execute_route("who is the president", self._fallback_decision()))
+        assert result.classified_as == "search (fallback)"
+
+    def test_fallback_confidence_is_top_score(self, mocker):
+        """Confidence must be the original top-1 score, NOT averaged."""
+        fake = _make_engine_response("search", n=1)
+        mocker.patch(f"{_ROUTER_PREFIX}.asyncio.to_thread", return_value=fake)
+        result = run(execute_route("who is the president", self._fallback_decision()))
+        # top score from _fallback_decision() is 0.25
+        assert abs(result.confidence - 0.25) < 1e-6
+
+    def test_fallback_route_detail_has_fallback_reason(self, mocker):
+        fake = _make_engine_response("search", n=1)
+        mocker.patch(f"{_ROUTER_PREFIX}.asyncio.to_thread", return_value=fake)
+        result = run(execute_route("who is the president", self._fallback_decision()))
+        assert result.route_detail is not None
+        assert "fallback_reason" in result.route_detail
+        assert "threshold" in result.route_detail["fallback_reason"]
+
+    def test_fallback_route_detail_has_original_scores(self, mocker):
+        fake = _make_engine_response("search", n=1)
+        mocker.patch(f"{_ROUTER_PREFIX}.asyncio.to_thread", return_value=fake)
+        result = run(execute_route("who is the president", self._fallback_decision()))
+        assert "shopping" in result.route_detail
+        assert "scholar" in result.route_detail
+
+
+# ---------------------------------------------------------------------------
+# (d) execute_route — dual mode: happy path
 # ---------------------------------------------------------------------------
 
 

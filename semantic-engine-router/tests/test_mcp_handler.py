@@ -261,30 +261,69 @@ class TestDualRouting:
 
 
 # ---------------------------------------------------------------------------
-# (d) Unimplemented engine stub (search only — local/patents now real)
+# (d) Fallback routing (Phase 9)
 # ---------------------------------------------------------------------------
 
 
-class TestUnimplementedEngines:
-    @pytest.mark.parametrize("category,score", [
-        ("search", 0.48),
-    ])
-    def test_stub_returned_without_crash(self, mocker, category, score):
-        stub = EngineResponse(
-            success=False,
-            engine=category,
-            error="Engine not yet implemented",
-            classified_as=category,
-            confidence=score,
-        )
-        _setup_single_route(mocker, category, score, stub)
+FAKE_FALLBACK_RESULT = EngineResponse(
+    success=True,
+    engine="search",
+    result_count=3,
+    results=[
+        EngineResult(
+            title="📌 Tirupati, Andhra Pradesh",
+            snippet="32°C, Partly Cloudy",
+            link="https://weather.com/tirupati",
+            metadata={"source_type": "answer_box", "type": "weather_result"},
+        ),
+        EngineResult(
+            title="Weather in Tirupati",
+            snippet="Sunny, 32\u00b0C. High humidity. ([weather.com](https://weather.com/tirupati))",
+            link="https://weather.com/tirupati",
+            metadata={"source_type": "organic", "source": "weather.com"},
+        ),
+    ],
+    classified_as="search (fallback)",
+    confidence=0.25,
+    route_detail={"shopping": 0.25, "scholar": 0.20,
+                  "fallback_reason": "top score 0.250 < threshold 0.35"},
+)
 
-        result = run("some query")
-        data = json.loads(result)
 
-        assert data["success"] is False
-        assert data["engine"] == category
-        assert data["error"] == "Engine not yet implemented"
+class TestFallbackRouting:
+    def _mock_fallback(self, mocker):
+        mocker.patch(_GET_CENTROIDS, return_value=FAKE_CENTROIDS)
+        mocker.patch(_CLASSIFY_TOP, return_value=[("shopping", 0.25), ("scholar", 0.20)])
+        mocker.patch(_DECIDE_ROUTE, return_value={
+            "mode": "fallback",
+            "categories": ["search"],
+            "scores": [("shopping", 0.25), ("scholar", 0.20)],
+        })
+
+        async def _fake_execute(query, decision):
+            return FAKE_FALLBACK_RESULT
+
+        mocker.patch(_EXECUTE_ROUTE, side_effect=_fake_execute)
+
+    def test_fallback_returns_json_string(self, mocker):
+        self._mock_fallback(mocker)
+        assert isinstance(run("what is the weather in Tirupati"), str)
+
+    def test_fallback_engine_is_search(self, mocker):
+        self._mock_fallback(mocker)
+        data = json.loads(run("what is the weather in Tirupati"))
+        assert data["engine"] == "search"
+
+    def test_fallback_classified_as_search_fallback(self, mocker):
+        self._mock_fallback(mocker)
+        data = json.loads(run("what is the weather in Tirupati"))
+        assert data["classified_as"] == "search (fallback)"
+
+    def test_fallback_route_detail_has_reason(self, mocker):
+        self._mock_fallback(mocker)
+        data = json.loads(run("what is the weather in Tirupati"))
+        assert data["route_detail"] is not None
+        assert "fallback_reason" in data["route_detail"]
 
 
 # ---------------------------------------------------------------------------

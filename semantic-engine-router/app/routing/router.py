@@ -1,19 +1,22 @@
 """
 app/routing/router.py
 ======================
-Dual-engine routing logic for Universal_Search.
+Three-mode routing logic for Universal_Search.
 
 Decision algorithm
 ------------------
 ``classify_top`` returns a ranked list of ``(category, score)`` pairs.
-If the gap between the #1 and #2 scores is <= ``DUAL_ROUTE_THRESHOLD``,
-both engines are queried concurrently and their results are merged.
-Otherwise, only the top-1 engine is called.
+
+1. **Fallback** — if the top score is strictly below ``MIN_CONFIDENCE_THRESHOLD``,
+   none of the specialist engines is trustworthy.  Route to the base Google
+   Search fallback immediately.
+2. **Dual** — if the gap between #1 and #2 scores is <= ``DUAL_ROUTE_THRESHOLD``,
+   both engines are queried concurrently and results merged.
+3. **Single** — the top-1 specialist engine is called.
 
 ENGINE_MAP
 ----------
 Maps each category name to its synchronous engine function.
-``"search"`` maps to ``None`` — the "base Search" engine is Phase 9.
 
 Adding a new engine in a future phase?
   1. Implement ``search_<engine>(query, num_results) -> EngineResponse``
@@ -32,6 +35,7 @@ from app.engines.shopping import search_shopping
 from app.engines.scholar import search_scholar
 from app.engines.local import search_local
 from app.engines.patents import search_patents
+from app.engines.fallback import search_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +49,13 @@ Gap (top-1 score − top-2 score) at or below which BOTH engines are queried.
 Raise this to make dual-routing more aggressive; lower it to make it rarer.
 """
 
+MIN_CONFIDENCE_THRESHOLD: float = 0.35
+"""
+Minimum top-1 score for any specialist engine to be trusted.
+Below this, the query is ambiguous / out-of-domain and falls back to plain
+Google Search.  Raise to make fallback more frequent; lower to reduce it.
+"""
+
 # ---------------------------------------------------------------------------
 # Engine map
 # ---------------------------------------------------------------------------
@@ -54,7 +65,7 @@ ENGINE_MAP: dict[str, Callable | None] = {
     "scholar":  search_scholar,
     "local":    search_local,
     "patents":  search_patents,
-    "search":   None,   # Phase 9 — Google base Search
+    "search":   search_fallback,   # Phase 9 — now implemented
 }
 
 
@@ -65,7 +76,7 @@ ENGINE_MAP: dict[str, Callable | None] = {
 
 def decide_route(scores: list[tuple[str, float]]) -> dict[str, Any]:
     """
-    Decide between single-engine and dual-engine routing.
+    Decide between fallback, single-engine, and dual-engine routing.
 
     Parameters
     ----------
@@ -76,21 +87,39 @@ def decide_route(scores: list[tuple[str, float]]) -> dict[str, Any]:
     Returns
     -------
     dict with keys:
-        ``mode``       — ``"single"`` or ``"dual"``
-        ``categories`` — list of one (single) or two (dual) category names
+        ``mode``       — ``"fallback"``, ``"single"``, or ``"dual"``
+        ``categories`` — ``["search"]`` (fallback), ``[cat]`` (single),
+                         or ``[cat1, cat2]`` (dual)
         ``scores``     — the original scores list (carried forward for
                          ``route_detail`` and ``confidence`` injection)
+
+    Priority order
+    --------------
+    1. Fallback check (top score < MIN_CONFIDENCE_THRESHOLD) — evaluated first.
+    2. Dual check (gap ≤ DUAL_ROUTE_THRESHOLD).
+    3. Single (default).
     """
     if not scores:
         raise ValueError("scores must be non-empty")
 
-    if len(scores) < 2:
-        return {"mode": "single", "categories": [scores[0][0]], "scores": scores}
-
     top1_cat, top1_score = scores[0]
+
+    # ── 1. Fallback: low-confidence top score ─────────────────────────────
+    if top1_score < MIN_CONFIDENCE_THRESHOLD:
+        logger.info(
+            "decide_route: FALLBACK — top=%r score=%.3f < threshold=%.2f",
+            top1_cat, top1_score, MIN_CONFIDENCE_THRESHOLD,
+        )
+        return {"mode": "fallback", "categories": ["search"], "scores": scores}
+
+    # ── 2. Only one score: must be single ─────────────────────────────────
+    if len(scores) < 2:
+        return {"mode": "single", "categories": [top1_cat], "scores": scores}
+
     top2_cat, top2_score = scores[1]
     gap = round(top1_score - top2_score, 10)
 
+    # ── 3. Dual: top-2 are close ──────────────────────────────────────────
     if gap <= DUAL_ROUTE_THRESHOLD:
         logger.info(
             "decide_route: DUAL — %r=%.3f, %r=%.3f (gap=%.3f ≤ threshold=%.2f)",
@@ -98,6 +127,7 @@ def decide_route(scores: list[tuple[str, float]]) -> dict[str, Any]:
         )
         return {"mode": "dual", "categories": [top1_cat, top2_cat], "scores": scores}
 
+    # ── 4. Single ─────────────────────────────────────────────────────────
     logger.info(
         "decide_route: SINGLE — %r=%.3f (gap=%.3f > threshold=%.2f)",
         top1_cat, top1_score, gap, DUAL_ROUTE_THRESHOLD,
@@ -176,6 +206,23 @@ async def execute_route(query: str, route_decision: dict[str, Any]) -> EngineRes
     categories: list[str] = route_decision["categories"]
     raw_scores: list[tuple[str, float]] = route_decision["scores"]
     score_map: dict[str, float] = {cat: sc for cat, sc in raw_scores}
+
+    # ── Fallback mode ────────────────────────────────────────────────────────
+    if mode == "fallback":
+        top_cat, top_score = raw_scores[0] if raw_scores else ("unknown", 0.0)
+        logger.info(
+            "execute_route: fallback — top category was %r (%.3f), routing to search",
+            top_cat, top_score,
+        )
+        result = await asyncio.to_thread(search_fallback, query)
+        result.classified_as = "search (fallback)"
+        result.confidence = round(top_score, 4)
+        route_detail: dict[str, Any] = {cat: round(sc, 4) for cat, sc in raw_scores[:2]}
+        route_detail["fallback_reason"] = (
+            f"top score {top_score:.3f} < threshold {MIN_CONFIDENCE_THRESHOLD}"
+        )
+        result.route_detail = route_detail
+        return result
 
     # ── Single mode ──────────────────────────────────────────────────────────
     if mode == "single":

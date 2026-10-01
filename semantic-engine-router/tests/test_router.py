@@ -181,84 +181,54 @@ class TestExecuteRouteDualHappy:
             "scores": [("shopping", 0.62), ("scholar", 0.55)],
         }
 
-    def _mock_gather(self, mocker, r1, r2):
-        """Patch asyncio.gather to return (r1, r2) without actually running tasks."""
-        import asyncio as _asyncio
+    def _patch_gather(self, mocker, r1, r2):
+        """Mock asyncio.gather AND _run_engine to avoid unawaited-coroutine warnings.
 
-        async def _fake_gather(*coros, return_exceptions=False):
-            return (r1, r2)
-
-        mocker.patch(f"{_ROUTER_PREFIX}.asyncio.gather", side_effect=_fake_gather)
-        # Also patch _run_engine so gather receives coroutines safely
-        mocker.patch(f"{_ROUTER_PREFIX}._run_engine", side_effect=[
-            _async_return(r1), _async_return(r2)
-        ])
-
-    def test_dual_result_count_is_sum(self, mocker):
-        r1 = _make_engine_response("shopping", n=3)
-        r2 = _make_engine_response("scholar", n=2)
-
+        Patching _run_engine prevents real coroutines from being created when
+        execute_route calls _run_engine(cat1, query) as gather arguments.  Those
+        coroutines would otherwise be created but never awaited (gather is replaced).
+        """
         async def fake_gather(*args, return_exceptions=True):
             return (r1, r2)
 
         mocker.patch(f"{_ROUTER_PREFIX}.asyncio.gather", side_effect=fake_gather)
+        mocker.patch(f"{_ROUTER_PREFIX}._run_engine")  # prevents real coroutine creation
 
+    def test_dual_result_count_is_sum(self, mocker):
+        r1 = _make_engine_response("shopping", n=3)
+        r2 = _make_engine_response("scholar", n=2)
+        self._patch_gather(mocker, r1, r2)
         result = run(execute_route("compare iPhone research", self._dual_decision()))
-
         assert result.result_count == 5
         assert len(result.results) == 5
 
     def test_dual_engine_name_formatted(self, mocker):
         r1 = _make_engine_response("shopping", n=1)
         r2 = _make_engine_response("scholar", n=1)
-
-        async def fake_gather(*args, return_exceptions=True):
-            return (r1, r2)
-
-        mocker.patch(f"{_ROUTER_PREFIX}.asyncio.gather", side_effect=fake_gather)
-
+        self._patch_gather(mocker, r1, r2)
         result = run(execute_route("compare iPhone research", self._dual_decision()))
-
         assert result.engine == "dual:shopping+scholar"
 
     def test_dual_classified_as_dual(self, mocker):
         r1 = _make_engine_response("shopping", n=1)
         r2 = _make_engine_response("scholar", n=1)
-
-        async def fake_gather(*args, return_exceptions=True):
-            return (r1, r2)
-
-        mocker.patch(f"{_ROUTER_PREFIX}.asyncio.gather", side_effect=fake_gather)
-
+        self._patch_gather(mocker, r1, r2)
         result = run(execute_route("compare iPhone research", self._dual_decision()))
-
         assert result.classified_as == "dual"
 
     def test_dual_confidence_is_average(self, mocker):
         r1 = _make_engine_response("shopping", n=1)
         r2 = _make_engine_response("scholar", n=1)
-
-        async def fake_gather(*args, return_exceptions=True):
-            return (r1, r2)
-
-        mocker.patch(f"{_ROUTER_PREFIX}.asyncio.gather", side_effect=fake_gather)
-
+        self._patch_gather(mocker, r1, r2)
         result = run(execute_route("compare iPhone research", self._dual_decision()))
-
         expected = round((0.62 + 0.55) / 2, 4)
         assert abs(result.confidence - expected) < 1e-6
 
     def test_dual_route_detail_has_scores(self, mocker):
         r1 = _make_engine_response("shopping", n=1)
         r2 = _make_engine_response("scholar", n=1)
-
-        async def fake_gather(*args, return_exceptions=True):
-            return (r1, r2)
-
-        mocker.patch(f"{_ROUTER_PREFIX}.asyncio.gather", side_effect=fake_gather)
-
+        self._patch_gather(mocker, r1, r2)
         result = run(execute_route("compare iPhone research", self._dual_decision()))
-
         assert result.route_detail is not None
         assert abs(result.route_detail["shopping"] - 0.62) < 1e-6
         assert abs(result.route_detail["scholar"] - 0.55) < 1e-6
@@ -266,17 +236,10 @@ class TestExecuteRouteDualHappy:
     def test_dual_source_engine_injected_in_metadata(self, mocker):
         r1 = _make_engine_response("shopping", n=2)
         r2 = _make_engine_response("scholar", n=1)
-
-        async def fake_gather(*args, return_exceptions=True):
-            return (r1, r2)
-
-        mocker.patch(f"{_ROUTER_PREFIX}.asyncio.gather", side_effect=fake_gather)
-
+        self._patch_gather(mocker, r1, r2)
         result = run(execute_route("compare iPhone research", self._dual_decision()))
-
         shopping_results = [r for r in result.results if r.metadata.get("source_engine") == "shopping"]
         scholar_results  = [r for r in result.results if r.metadata.get("source_engine") == "scholar"]
-
         assert len(shopping_results) == 2
         assert len(scholar_results) == 1
 
@@ -284,14 +247,8 @@ class TestExecuteRouteDualHappy:
         """Cat1 results must come before cat2 results in the merged list."""
         r1 = _make_engine_response("shopping", n=2)
         r2 = _make_engine_response("scholar", n=1)
-
-        async def fake_gather(*args, return_exceptions=True):
-            return (r1, r2)
-
-        mocker.patch(f"{_ROUTER_PREFIX}.asyncio.gather", side_effect=fake_gather)
-
+        self._patch_gather(mocker, r1, r2)
         result = run(execute_route("compare iPhone research", self._dual_decision()))
-
         sources = [r.metadata["source_engine"] for r in result.results]
         assert sources == ["shopping", "shopping", "scholar"]
 
@@ -309,32 +266,26 @@ class TestExecuteRouteDualPartialFailure:
             "scores": [("shopping", 0.62), ("scholar", 0.55)],
         }
 
+    def _patch_gather(self, mocker, r1, r2):
+        async def fake_gather(*args, return_exceptions=True):
+            return (r1, r2)
+        mocker.patch(f"{_ROUTER_PREFIX}.asyncio.gather", side_effect=fake_gather)
+        mocker.patch(f"{_ROUTER_PREFIX}._run_engine")  # prevents unawaited coroutines
+
     def test_partial_failure_still_returns_success(self, mocker):
         """If one engine raises, the other's results are still returned."""
         r1 = _make_engine_response("shopping", n=3)
         exc = RuntimeError("Connection refused")
-
-        async def fake_gather(*args, return_exceptions=True):
-            return (r1, exc)
-
-        mocker.patch(f"{_ROUTER_PREFIX}.asyncio.gather", side_effect=fake_gather)
-
+        self._patch_gather(mocker, r1, exc)
         result = run(execute_route("compare iPhone research", self._dual_decision()))
-
         assert result.success is True
         assert result.result_count == 3
 
     def test_partial_failure_error_recorded_in_route_detail(self, mocker):
         r1 = _make_engine_response("shopping", n=2)
         exc = RuntimeError("Timeout")
-
-        async def fake_gather(*args, return_exceptions=True):
-            return (r1, exc)
-
-        mocker.patch(f"{_ROUTER_PREFIX}.asyncio.gather", side_effect=fake_gather)
-
+        self._patch_gather(mocker, r1, exc)
         result = run(execute_route("compare iPhone research", self._dual_decision()))
-
         assert "scholar_error" in result.route_detail
         assert "Timeout" in result.route_detail["scholar_error"]
 
@@ -342,14 +293,8 @@ class TestExecuteRouteDualPartialFailure:
         """If one engine returns success=False, other results still returned."""
         r1 = _make_engine_response("shopping", n=2)
         r2 = EngineResponse(success=False, engine="scholar", error="Invalid API key")
-
-        async def fake_gather(*args, return_exceptions=True):
-            return (r1, r2)
-
-        mocker.patch(f"{_ROUTER_PREFIX}.asyncio.gather", side_effect=fake_gather)
-
+        self._patch_gather(mocker, r1, r2)
         result = run(execute_route("compare iPhone research", self._dual_decision()))
-
         assert result.success is True
         assert result.result_count == 2
         assert "scholar_error" in result.route_detail
@@ -358,14 +303,8 @@ class TestExecuteRouteDualPartialFailure:
         """If both engines fail, return empty success (don't raise)."""
         exc1 = RuntimeError("Timeout on shopping")
         exc2 = RuntimeError("Timeout on scholar")
-
-        async def fake_gather(*args, return_exceptions=True):
-            return (exc1, exc2)
-
-        mocker.patch(f"{_ROUTER_PREFIX}.asyncio.gather", side_effect=fake_gather)
-
+        self._patch_gather(mocker, exc1, exc2)
         result = run(execute_route("compare iPhone research", self._dual_decision()))
-
         assert result.success is True
         assert result.result_count == 0
         assert "shopping_error" in result.route_detail

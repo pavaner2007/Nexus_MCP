@@ -28,6 +28,8 @@ from app.config import settings  # noqa: F401  — validates SERPAPI_KEY at star
 from app.classifier.centroids import load_centroids
 from app.engines.shopping import search_shopping
 from app.engines.scholar import search_scholar
+from app.engines.local import search_local
+from app.engines.patents import search_patents
 from app.classifier.classify import classify, classify_top
 from app.schemas import EngineResponse
 
@@ -122,6 +124,30 @@ async def scholar_search(body: ShoppingRequest) -> EngineResponse:
     * **error** — present only when ``success`` is ``false``.
     """
     return search_scholar(body.query, num_results=body.num_results)
+
+
+@app.post("/engines/local", response_model=EngineResponse, tags=["Engines"])
+async def local_search(body: ShoppingRequest) -> EngineResponse:
+    """
+    Query the Google Local SerpApi engine and return trimmed business results.
+
+    * **success** — ``true`` if the call succeeded.
+    * **results** — list of trimmed place objects (title, address, rating, type …).
+    * **error** — present only when ``success`` is ``false``.
+    """
+    return search_local(body.query, num_results=body.num_results)
+
+
+@app.post("/engines/patents", response_model=EngineResponse, tags=["Engines"])
+async def patents_search(body: ShoppingRequest) -> EngineResponse:
+    """
+    Query the Google Patents SerpApi engine and return trimmed patent records.
+
+    * **success** — ``true`` if the call succeeded.
+    * **results** — list of trimmed patent objects (title, inventor, assignee, filing_date …).
+    * **error** — present only when ``success`` is ``false``.
+    """
+    return search_patents(body.query, num_results=body.num_results)
 
 
 @app.post("/classify", response_model=ClassifyResponse, tags=["Classifier"])

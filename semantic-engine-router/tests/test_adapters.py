@@ -10,7 +10,12 @@ shaped EngineResult.
 
 from __future__ import annotations
 
-from app.engines.adapters import adapt_shopping_result, adapt_scholar_result
+from app.engines.adapters import (
+    adapt_shopping_result,
+    adapt_scholar_result,
+    adapt_local_result,
+    adapt_patents_result,
+)
 from app.schemas import EngineResult
 
 
@@ -198,3 +203,206 @@ class TestAdaptScholarResult:
         result = adapt_scholar_result(raw)
         assert "result_id" not in result.metadata
         assert "type" not in result.metadata
+
+
+# ---------------------------------------------------------------------------
+# Shared fixtures — Local
+# ---------------------------------------------------------------------------
+
+FULL_LOCAL_PLACE = {
+    "title": "Kumbakonam Degree Coffee",
+    "address": "12, Anna Salai, Chennai, Tamil Nadu 600002",
+    "rating": 4.5,
+    "reviews": 3210,
+    "type": "Coffee Shop",
+    "phone": "+91 44 2345 6789",
+    "hours": {"open_now": True},
+    "open_now": True,
+    "link": "https://maps.google.com/?cid=123456",
+    "thumbnail": "https://cdn.example.com/coffee.jpg",
+}
+
+MINIMAL_LOCAL_PLACE = {
+    "title": "Unnamed Shop",
+    "link": "https://maps.google.com/?cid=000",
+}
+
+
+# ---------------------------------------------------------------------------
+# adapt_local_result
+# ---------------------------------------------------------------------------
+
+
+class TestAdaptLocalResult:
+    def test_returns_engine_result_instance(self):
+        result = adapt_local_result(FULL_LOCAL_PLACE)
+        assert isinstance(result, EngineResult)
+
+    def test_title_mapped_correctly(self):
+        result = adapt_local_result(FULL_LOCAL_PLACE)
+        assert result.title == "Kumbakonam Degree Coffee"
+
+    def test_link_mapped_correctly(self):
+        result = adapt_local_result(FULL_LOCAL_PLACE)
+        assert result.link == "https://maps.google.com/?cid=123456"
+
+    def test_thumbnail_mapped_correctly(self):
+        result = adapt_local_result(FULL_LOCAL_PLACE)
+        assert result.thumbnail == "https://cdn.example.com/coffee.jpg"
+
+    def test_snippet_synthesised_from_rating_and_type(self):
+        result = adapt_local_result(FULL_LOCAL_PLACE)
+        assert result.snippet is not None
+        assert "4.5" in result.snippet
+        assert "Coffee Shop" in result.snippet
+
+    def test_snippet_only_rating_when_no_type(self):
+        raw = {"title": "Place", "rating": 3.8, "link": "http://x.com"}
+        result = adapt_local_result(raw)
+        assert "3.8" in result.snippet
+
+    def test_snippet_only_type_when_no_rating(self):
+        raw = {"title": "Place", "type": "Bakery", "link": "http://x.com"}
+        result = adapt_local_result(raw)
+        assert result.snippet == "Bakery"
+
+    def test_snippet_falls_back_to_address(self):
+        raw = {"title": "Place", "address": "5, Main St", "link": "http://x.com"}
+        result = adapt_local_result(raw)
+        assert result.snippet == "5, Main St"
+
+    def test_snippet_none_when_no_clues(self):
+        raw = {"title": "Place", "link": "http://x.com"}
+        result = adapt_local_result(raw)
+        assert result.snippet is None
+
+    def test_address_in_metadata(self):
+        result = adapt_local_result(FULL_LOCAL_PLACE)
+        assert result.metadata["address"] == "12, Anna Salai, Chennai, Tamil Nadu 600002"
+
+    def test_phone_in_metadata(self):
+        result = adapt_local_result(FULL_LOCAL_PLACE)
+        assert result.metadata["phone"] == "+91 44 2345 6789"
+
+    def test_rating_in_metadata(self):
+        result = adapt_local_result(FULL_LOCAL_PLACE)
+        assert result.metadata["rating"] == 4.5
+
+    def test_reviews_in_metadata(self):
+        result = adapt_local_result(FULL_LOCAL_PLACE)
+        assert result.metadata["reviews"] == 3210
+
+    def test_type_in_metadata(self):
+        result = adapt_local_result(FULL_LOCAL_PLACE)
+        assert result.metadata["type"] == "Coffee Shop"
+
+    def test_optional_metadata_absent_when_missing(self):
+        result = adapt_local_result(MINIMAL_LOCAL_PLACE)
+        assert "address" not in result.metadata
+        assert "phone" not in result.metadata
+        assert "rating" not in result.metadata
+
+    def test_missing_title_defaults_to_unknown(self):
+        result = adapt_local_result({})
+        assert result.title == "Unknown Place"
+
+    def test_noise_fields_not_in_metadata(self):
+        raw = {**FULL_LOCAL_PLACE, "place_id": "ChIJXyz", "serpapi_link": "https://...", "position": 1}
+        result = adapt_local_result(raw)
+        assert "place_id" not in result.metadata
+        assert "serpapi_link" not in result.metadata
+        assert "position" not in result.metadata
+
+
+# ---------------------------------------------------------------------------
+# Shared fixtures — Patents
+# ---------------------------------------------------------------------------
+
+FULL_PATENT = {
+    "title": "Lithium-ion battery with improved cycle life",
+    "patent_id": "US10123456B2",
+    "publication_number": "US10123456B2",
+    "inventor": "John A. Doe, Jane B. Smith",
+    "assignee": "Acme Energy Corp",
+    "filing_date": "2018-03-15",
+    "publication_date": "2020-11-03",
+    "link": "https://patents.google.com/patent/US10123456B2",
+    "pdf_link": "https://patents.google.com/patent/US10123456B2/en.pdf",
+    "snippet": "A lithium-ion battery comprising an improved cathode material...",
+}
+
+MINIMAL_PATENT = {
+    "title": "A Simple Invention",
+    "link": "https://patents.google.com/patent/US000",
+}
+
+
+# ---------------------------------------------------------------------------
+# adapt_patents_result
+# ---------------------------------------------------------------------------
+
+
+class TestAdaptPatentsResult:
+    def test_returns_engine_result_instance(self):
+        result = adapt_patents_result(FULL_PATENT)
+        assert isinstance(result, EngineResult)
+
+    def test_title_mapped_correctly(self):
+        result = adapt_patents_result(FULL_PATENT)
+        assert result.title == "Lithium-ion battery with improved cycle life"
+
+    def test_link_mapped_correctly(self):
+        result = adapt_patents_result(FULL_PATENT)
+        assert result.link == "https://patents.google.com/patent/US10123456B2"
+
+    def test_thumbnail_always_none(self):
+        """Patents have no thumbnails."""
+        result = adapt_patents_result(FULL_PATENT)
+        assert result.thumbnail is None
+
+    def test_snippet_mapped_from_abstract(self):
+        result = adapt_patents_result(FULL_PATENT)
+        assert result.snippet == FULL_PATENT["snippet"]
+
+    def test_snippet_none_when_absent(self):
+        result = adapt_patents_result(MINIMAL_PATENT)
+        assert result.snippet is None
+
+    def test_patent_id_in_metadata(self):
+        result = adapt_patents_result(FULL_PATENT)
+        assert result.metadata["patent_id"] == "US10123456B2"
+
+    def test_publication_number_in_metadata(self):
+        result = adapt_patents_result(FULL_PATENT)
+        assert result.metadata["publication_number"] == "US10123456B2"
+
+    def test_inventor_in_metadata(self):
+        result = adapt_patents_result(FULL_PATENT)
+        assert "John A. Doe" in result.metadata["inventor"]
+
+    def test_assignee_in_metadata(self):
+        result = adapt_patents_result(FULL_PATENT)
+        assert result.metadata["assignee"] == "Acme Energy Corp"
+
+    def test_filing_date_in_metadata(self):
+        result = adapt_patents_result(FULL_PATENT)
+        assert result.metadata["filing_date"] == "2018-03-15"
+
+    def test_publication_date_in_metadata(self):
+        result = adapt_patents_result(FULL_PATENT)
+        assert result.metadata["publication_date"] == "2020-11-03"
+
+    def test_pdf_link_in_metadata(self):
+        result = adapt_patents_result(FULL_PATENT)
+        assert "pdf_link" in result.metadata
+
+    def test_optional_metadata_absent_when_missing(self):
+        result = adapt_patents_result(MINIMAL_PATENT)
+        assert "patent_id" not in result.metadata
+        assert "inventor" not in result.metadata
+        assert "assignee" not in result.metadata
+        assert "pdf_link" not in result.metadata
+
+    def test_missing_title_defaults_to_unknown(self):
+        result = adapt_patents_result({})
+        assert result.title == "Unknown Patent"

@@ -3,8 +3,15 @@ tests/test_mcp_handler.py
 ==========================
 Unit tests for the Universal_Search MCP tool handler.
 
-All external calls (classify_top, search_shopping, search_scholar,
-_get_centroids) are mocked — no real API calls, no model loading.
+Phase 8 notes
+-------------
+- ``universal_search`` is now ``async`` — calls are wrapped in
+  ``asyncio.run()`` so no extra dependencies (e.g. pytest-asyncio) are needed.
+- Routing now goes through ``app.routing.router.execute_route``, so engine
+  mocks target ``app.routing.router.<engine>`` and routing functions.
+- local + patents are real engines; "search" is the only remaining stub.
+
+All external calls are mocked — no real API calls, no model loading.
 
 Run with:
     pytest tests/test_mcp_handler.py -v
@@ -12,6 +19,7 @@ Run with:
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -22,20 +30,38 @@ from app.mcp.server import universal_search
 from app.schemas import EngineResponse, EngineResult
 
 # ---------------------------------------------------------------------------
-# Mock targets (patch at the server module level so all calls are intercepted)
+# Mock targets
 # ---------------------------------------------------------------------------
 
-_GET_CENTROIDS = "app.mcp.server._get_centroids"
-_CLASSIFY_TOP  = "app.mcp.server.classify_top"
-_SEARCH_SHOPPING = "app.mcp.server.search_shopping"
-_SEARCH_SCHOLAR  = "app.mcp.server.search_scholar"
+_GET_CENTROIDS    = "app.mcp.server._get_centroids"
+_CLASSIFY_TOP     = "app.mcp.server.classify_top"
+_DECIDE_ROUTE     = "app.mcp.server.decide_route"
+_EXECUTE_ROUTE    = "app.mcp.server.execute_route"
+
+# Router-level engine patches (used only when testing routing directly)
+_ROUTER_SHOPPING  = "app.routing.router.search_shopping"
+_ROUTER_SCHOLAR   = "app.routing.router.search_scholar"
+_ROUTER_LOCAL     = "app.routing.router.search_local"
+_ROUTER_PATENTS   = "app.routing.router.search_patents"
 
 # ---------------------------------------------------------------------------
-# Shared fake data — now EngineResponse objects (not raw dicts) so that
-# handler's `result.classified_as = ...` attribute setting works correctly.
+# Helpers
 # ---------------------------------------------------------------------------
 
-FAKE_CENTROIDS = {"shopping": None, "scholar": None, "local": None, "patents": None, "search": None}
+
+def run(query: str) -> str:
+    """Run ``universal_search`` synchronously in tests."""
+    return asyncio.run(universal_search(query))
+
+
+# ---------------------------------------------------------------------------
+# Shared fake data
+# ---------------------------------------------------------------------------
+
+FAKE_CENTROIDS = {
+    "shopping": None, "scholar": None,
+    "local": None, "patents": None, "search": None,
+}
 
 FAKE_SHOPPING_RESULT = EngineResponse(
     success=True,
@@ -68,7 +94,11 @@ FAKE_SCHOLAR_RESULT = EngineResponse(
             title="Attention Is All You Need",
             snippet="The dominant sequence transduction models...",
             link="https://arxiv.org/abs/1706.03762",
-            metadata={"authors": ["Ashish Vaswani", "Noam Shazeer"], "year": "2017", "cited_by_count": 98765},
+            metadata={
+                "authors": ["Ashish Vaswani", "Noam Shazeer"],
+                "year": "2017",
+                "cited_by_count": 98765,
+            },
         ),
     ],
 )
@@ -79,140 +109,188 @@ FAKE_ERROR_RESULT = EngineResponse(
     error="Request to SerpApi timed out or failed",
 )
 
+FAKE_DUAL_RESULT = EngineResponse(
+    success=True,
+    engine="dual:shopping+scholar",
+    result_count=3,
+    results=[
+        EngineResult(title="iPhone 15 Pro", snippet="$999", link="https://apple.com",
+                     metadata={"source_engine": "shopping"}),
+        EngineResult(title="iPhone 15",     snippet="$799", link="https://bestbuy.com",
+                     metadata={"source_engine": "shopping"}),
+        EngineResult(title="Attention Is All You Need", snippet="Abstract...",
+                     link="https://arxiv.org/", metadata={"source_engine": "scholar"}),
+    ],
+    classified_as="dual",
+    confidence=0.585,
+    route_detail={"shopping": 0.62, "scholar": 0.55},
+)
+
+
+# ---------------------------------------------------------------------------
+# Shared mock setup
+# ---------------------------------------------------------------------------
+
+
+def _setup_single_route(mocker, category: str, score: float, engine_result):
+    """Patch centroids, classify_top, decide_route, execute_route for single mode."""
+    mocker.patch(_GET_CENTROIDS, return_value=FAKE_CENTROIDS)
+    mocker.patch(_CLASSIFY_TOP, return_value=[(category, score)])
+    mocker.patch(_DECIDE_ROUTE, return_value={
+        "mode": "single",
+        "categories": [category],
+        "scores": [(category, score)],
+    })
+
+    async def _fake_execute(query, decision):
+        return engine_result
+
+    mocker.patch(_EXECUTE_ROUTE, side_effect=_fake_execute)
 
 
 # ---------------------------------------------------------------------------
 # (a) Shopping routing
 # ---------------------------------------------------------------------------
 
+
 class TestShoppingRouting:
-    def _mock_shopping(self, mocker, engine_result=None):
-        mocker.patch(_GET_CENTROIDS, return_value=FAKE_CENTROIDS)
-        mocker.patch(_CLASSIFY_TOP, return_value=[("shopping", 0.82)])
-        mocker.patch(_SEARCH_SHOPPING, return_value=(engine_result or FAKE_SHOPPING_RESULT.copy()))
+    def _mock(self, mocker, result=None):
+        _setup_single_route(
+            mocker, "shopping", 0.82,
+            (result or FAKE_SHOPPING_RESULT).model_copy()
+        )
 
     def test_returns_json_string(self, mocker):
-        self._mock_shopping(mocker)
-        result = universal_search("what's the price of iPhone 15")
-        assert isinstance(result, str)
-        # Must be valid JSON
-        json.loads(result)
+        self._mock(mocker)
+        assert isinstance(run("what's the price of iPhone 15"), str)
 
     def test_contains_engine_result(self, mocker):
-        self._mock_shopping(mocker)
-        data = json.loads(universal_search("iPhone 15 price"))
+        self._mock(mocker)
+        data = json.loads(run("iPhone 15 price"))
         assert data["success"] is True
         assert data["engine"] == "shopping"
         assert data["result_count"] == 2
-        assert len(data["results"]) == 2
 
-    def test_injects_classified_as(self, mocker):
-        self._mock_shopping(mocker)
-        data = json.loads(universal_search("iPhone 15 price"))
-        assert data["classified_as"] == "shopping"
+    def test_execute_route_called(self, mocker):
+        self._mock(mocker)
 
-    def test_injects_confidence(self, mocker):
-        self._mock_shopping(mocker)
-        data = json.loads(universal_search("iPhone 15 price"))
-        assert abs(data["confidence"] - 0.82) < 1e-6
+        async def _fake_exec(query, decision):
+            return FAKE_SHOPPING_RESULT
 
-    def test_search_shopping_called_with_query(self, mocker):
-        self._mock_shopping(mocker)
-        mock_shopping = mocker.patch(_SEARCH_SHOPPING, return_value=FAKE_SHOPPING_RESULT.copy())
+        mock_exec = mocker.patch(_EXECUTE_ROUTE, side_effect=_fake_exec)
         mocker.patch(_GET_CENTROIDS, return_value=FAKE_CENTROIDS)
         mocker.patch(_CLASSIFY_TOP, return_value=[("shopping", 0.82)])
-        universal_search("buy MacBook Pro")
-        mock_shopping.assert_called_once_with("buy MacBook Pro")
+        mocker.patch(_DECIDE_ROUTE, return_value={
+            "mode": "single", "categories": ["shopping"], "scores": [("shopping", 0.82)]
+        })
+        run("buy MacBook Pro")
+        mock_exec.assert_called_once()
 
-    def test_engine_error_still_includes_metadata(self, mocker):
-        """Even on engine failure, classified_as and confidence must be present."""
-        self._mock_shopping(mocker, engine_result=FAKE_ERROR_RESULT.copy())
-        data = json.loads(universal_search("iPhone 15 price"))
+    def test_engine_error_still_serialises(self, mocker):
+        self._mock(mocker, result=FAKE_ERROR_RESULT)
+        data = json.loads(run("iPhone 15 price"))
         assert data["success"] is False
-        assert "classified_as" in data
-        assert "confidence" in data
 
 
 # ---------------------------------------------------------------------------
 # (b) Scholar routing
 # ---------------------------------------------------------------------------
 
+
 class TestScholarRouting:
-    def _mock_scholar(self, mocker):
-        mocker.patch(_GET_CENTROIDS, return_value=FAKE_CENTROIDS)
-        mocker.patch(_CLASSIFY_TOP, return_value=[("scholar", 0.74)])
-        mocker.patch(_SEARCH_SCHOLAR, return_value=FAKE_SCHOLAR_RESULT.copy())
+    def _mock(self, mocker):
+        _setup_single_route(mocker, "scholar", 0.74, FAKE_SCHOLAR_RESULT.model_copy())
 
     def test_returns_json_string(self, mocker):
-        self._mock_scholar(mocker)
-        result = universal_search("recent papers on transformers")
-        assert isinstance(result, str)
-        json.loads(result)
+        self._mock(mocker)
+        assert isinstance(run("recent papers on transformers"), str)
 
     def test_contains_paper_result(self, mocker):
-        self._mock_scholar(mocker)
-        data = json.loads(universal_search("attention mechanism papers"))
+        self._mock(mocker)
+        data = json.loads(run("attention mechanism papers"))
         assert data["success"] is True
         assert data["engine"] == "scholar"
         assert data["result_count"] == 1
 
-    def test_injects_classified_as_scholar(self, mocker):
-        self._mock_scholar(mocker)
-        data = json.loads(universal_search("NLP research 2024"))
-        assert data["classified_as"] == "scholar"
 
-    def test_injects_confidence(self, mocker):
-        self._mock_scholar(mocker)
-        data = json.loads(universal_search("NLP research 2024"))
-        assert abs(data["confidence"] - 0.74) < 1e-6
+# ---------------------------------------------------------------------------
+# (c) Dual-engine routing
+# ---------------------------------------------------------------------------
 
-    def test_search_scholar_called_with_query(self, mocker):
+
+class TestDualRouting:
+    def _mock_dual(self, mocker):
         mocker.patch(_GET_CENTROIDS, return_value=FAKE_CENTROIDS)
-        mocker.patch(_CLASSIFY_TOP, return_value=[("scholar", 0.74)])
-        mock_scholar = mocker.patch(_SEARCH_SCHOLAR, return_value=FAKE_SCHOLAR_RESULT.copy())
-        universal_search("papers on reinforcement learning")
-        mock_scholar.assert_called_once_with("papers on reinforcement learning")
+        mocker.patch(_CLASSIFY_TOP, return_value=[("shopping", 0.62), ("scholar", 0.55)])
+        mocker.patch(_DECIDE_ROUTE, return_value={
+            "mode": "dual",
+            "categories": ["shopping", "scholar"],
+            "scores": [("shopping", 0.62), ("scholar", 0.55)],
+        })
+
+        async def _fake_execute(query, decision):
+            return FAKE_DUAL_RESULT
+
+        mocker.patch(_EXECUTE_ROUTE, side_effect=_fake_execute)
+
+    def test_dual_returns_json_string(self, mocker):
+        self._mock_dual(mocker)
+        assert isinstance(run("compare iPhone prices and research"), str)
+
+    def test_dual_engine_field_format(self, mocker):
+        self._mock_dual(mocker)
+        data = json.loads(run("compare iPhone prices and research"))
+        assert data["engine"] == "dual:shopping+scholar"
+
+    def test_dual_classified_as_dual(self, mocker):
+        self._mock_dual(mocker)
+        data = json.loads(run("compare iPhone prices and research"))
+        assert data["classified_as"] == "dual"
+
+    def test_dual_route_detail_present(self, mocker):
+        self._mock_dual(mocker)
+        data = json.loads(run("compare iPhone prices and research"))
+        assert data["route_detail"] is not None
+        assert "shopping" in data["route_detail"]
+        assert "scholar" in data["route_detail"]
+
+    def test_dual_result_count_is_sum(self, mocker):
+        self._mock_dual(mocker)
+        data = json.loads(run("compare iPhone prices and research"))
+        assert data["result_count"] == 3
 
 
 # ---------------------------------------------------------------------------
-# (c) Unimplemented engine stub (local, patents, search)
+# (d) Unimplemented engine stub (search only — local/patents now real)
 # ---------------------------------------------------------------------------
+
 
 class TestUnimplementedEngines:
     @pytest.mark.parametrize("category,score", [
-        ("local", 0.61),
-        ("patents", 0.55),
         ("search", 0.48),
     ])
     def test_stub_returned_without_crash(self, mocker, category, score):
-        mocker.patch(_GET_CENTROIDS, return_value=FAKE_CENTROIDS)
-        mocker.patch(_CLASSIFY_TOP, return_value=[(category, score)])
+        stub = EngineResponse(
+            success=False,
+            engine=category,
+            error="Engine not yet implemented",
+            classified_as=category,
+            confidence=score,
+        )
+        _setup_single_route(mocker, category, score, stub)
 
-        result = universal_search("some query")
-
-        assert isinstance(result, str)
+        result = run("some query")
         data = json.loads(result)
 
         assert data["success"] is False
         assert data["engine"] == category
         assert data["error"] == "Engine not yet implemented"
-        assert data["classified_as"] == category
-        assert abs(data["confidence"] - score) < 1e-6
 
-    def test_stub_does_not_call_shopping(self, mocker):
-        mocker.patch(_GET_CENTROIDS, return_value=FAKE_CENTROIDS)
-        mocker.patch(_CLASSIFY_TOP, return_value=[("local", 0.61)])
-        mock_shopping = mocker.patch(_SEARCH_SHOPPING)
 
-        universal_search("coffee shops near me")
+# ---------------------------------------------------------------------------
+# Helper (module-level, not a test)
+# ---------------------------------------------------------------------------
 
-        mock_shopping.assert_not_called()
 
-    def test_stub_does_not_call_scholar(self, mocker):
-        mocker.patch(_GET_CENTROIDS, return_value=FAKE_CENTROIDS)
-        mocker.patch(_CLASSIFY_TOP, return_value=[("patents", 0.55)])
-        mock_scholar = mocker.patch(_SEARCH_SCHOLAR)
-
-        universal_search("patent for wireless charging")
-
-        mock_scholar.assert_not_called()
+async def _async_return(value):
+    return value

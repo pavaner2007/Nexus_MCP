@@ -7,33 +7,34 @@ This is the single public interface that LLM agents (Claude Desktop, Cursor,
 etc.) interact with.  Internally it:
 
   1. Classifies the query with the centroid-based embedding classifier.
-  2. Routes to the appropriate SerpApi engine function.
-  3. Returns a JSON string with the trimmed engine result + classifier metadata.
+  2. Calls ``decide_route`` to choose single or dual-engine routing.
+  3. Calls ``execute_route`` (async) to run engine(s) concurrently.
+  4. Returns a JSON string with the trimmed engine results + routing metadata.
+
+Phase 8 changes
+---------------
+- ``universal_search`` is now ``async`` — FastMCP supports async tools natively.
+- Routing is top-2-aware: queries whose top-2 scores are within
+  ``DUAL_ROUTE_THRESHOLD`` trigger concurrent dual-engine execution.
+- All four engines (shopping, scholar, local, patents) are now real — no stubs.
+- ``"search"`` (base Google Search) remains a Phase 9 stub.
 
 Centroid Loading
 ----------------
-Centroids are loaded lazily on the first tool call via `_get_centroids()`.
-A module-level cache (`_centroids`) ensures the model and disk read happen
-only once per process — matching the singleton pattern used in the FastAPI app.
-
-Unimplemented Engines
----------------------
-"local", "patents", and "search" engines are Phase 6+ work.  They return a
-clean stub so the tool never crashes or returns an empty string.
+Centroids are loaded lazily on the first tool call via ``_get_centroids()``.
+A module-level cache ensures the model and disk read happen only once per
+process — matching the singleton pattern used in the FastAPI app.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 
 from mcp.server.fastmcp import FastMCP
 
 from app.classifier.centroids import load_centroids
 from app.classifier.classify import classify_top
-from app.engines.shopping import search_shopping
-from app.engines.scholar import search_scholar
-from app.schemas import EngineResponse
+from app.routing.router import decide_route, execute_route
 
 logger = logging.getLogger(__name__)
 
@@ -64,49 +65,32 @@ def _get_centroids() -> dict:
 # Universal_Search tool
 # ---------------------------------------------------------------------------
 
-_UNIMPLEMENTED = {"local", "patents", "search"}
-
 
 @mcp.tool()
-def universal_search(query: str) -> str:
-    """Search the web for any query — products, prices, academic papers, research, local businesses, patents, or general information. Automatically returns the most relevant structured data for the query."""
+async def universal_search(query: str) -> str:
+    """Search the web for any query — products, prices, academic papers, research, local businesses, patents, or general information. Automatically returns the most relevant structured data for the query. Supports dual-engine routing for ambiguous queries."""
 
     centroids = _get_centroids()
 
-    # Step 1 — classify
-    top = classify_top(query, centroids, top_n=1)
-    category: str = top[0][0]
-    score: float = top[0][1]
+    # Step 1 — classify (top-2 for dual-route awareness)
+    scores = classify_top(query, centroids, top_n=2)
 
     logger.info(
-        "universal_search: query=%r → category='%s' (confidence=%.3f)",
-        query, category, score,
+        "universal_search: query=%r → top scores: %s",
+        query,
+        [(cat, f"{sc:.3f}") for cat, sc in scores],
     )
 
-    # Step 2 — route
-    if category == "shopping":
-        result = search_shopping(query)
-    elif category == "scholar":
-        result = search_scholar(query)
-    elif category in _UNIMPLEMENTED:
-        return EngineResponse(
-            success=False,
-            engine=category,
-            error="Engine not yet implemented",
-            classified_as=category,
-            confidence=score,
-        ).model_dump_json()
-    else:
-        return EngineResponse(
-            success=False,
-            engine=category,
-            error=f"Unknown engine category: {category!r}",
-            classified_as=category,
-            confidence=score,
-        ).model_dump_json()
+    # Step 2 — decide routing mode
+    decision = decide_route(scores)
 
-    # Step 3 — inject classifier metadata and serialise
-    result.classified_as = category
-    result.confidence = score
+    logger.info(
+        "universal_search: mode=%r categories=%r",
+        decision["mode"], decision["categories"],
+    )
 
-    return result.model_dump_json()
+    # Step 3 — execute (async, possibly concurrent dual-engine)
+    response = await execute_route(query, decision)
+
+    # Step 4 — serialise and return
+    return response.model_dump_json()

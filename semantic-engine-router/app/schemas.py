@@ -26,6 +26,10 @@ EngineResponse shape
 ``classified_as`` and ``confidence`` are ``None`` when the response comes
 from a direct engine endpoint call.  They are populated by the MCP tool
 handler (app/mcp/server.py) after classification.
+
+``route_detail`` is ``None`` for single-engine responses.  In dual-engine
+mode it carries per-engine confidence scores and any partial failure notes
+(e.g. ``{"shopping": 0.62, "scholar": 0.55, "scholar_error": "..."}``).
 """
 
 from __future__ import annotations
@@ -58,6 +62,10 @@ class EngineResponse(BaseModel):
     ``classified_as`` and ``confidence`` are populated by the MCP router
     after classification — they are ``None`` when calling engine endpoints
     directly.
+
+    ``route_detail`` is only present in dual-engine responses.  It maps
+    each queried category name to its confidence score and may include
+    ``<category>_error`` keys when a partial failure occurs.
     """
 
     success: bool
@@ -67,3 +75,4 @@ class EngineResponse(BaseModel):
     results: list[EngineResult] = Field(default_factory=list)
     classified_as: str | None = None
     confidence: float | None = None
+    route_detail: dict[str, Any] | None = None

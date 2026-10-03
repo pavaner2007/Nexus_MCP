@@ -125,16 +125,16 @@ class TestDecideRoute:
 
     def test_fallback_when_top_score_below_threshold(self):
         """Top score below MIN_CONFIDENCE_THRESHOLD → fallback, even with close gap."""
-        scores = [("shopping", 0.25), ("scholar", 0.20)]
+        scores = [("shopping", 0.15), ("scholar", 0.10)]
         decision = decide_route(scores)
         assert decision["mode"] == "fallback"
         assert decision["categories"] == ["search"]
 
     def test_fallback_takes_priority_over_dual(self):
-        """Small gap but low score → fallback wins (not dual)."""
-        # gap = 0.03 ≤ 0.15, but top score 0.28 < 0.35 → fallback
-        scores = [("shopping", 0.28), ("scholar", 0.25)]
-        assert 0.28 - 0.25 <= DUAL_ROUTE_THRESHOLD  # would be dual if confident
+        """Small gap but low score -> fallback wins (not dual)."""
+        # gap = 0.03 <= 0.15, but top score 0.18 < 0.20 -> fallback
+        scores = [("shopping", 0.18), ("scholar", 0.15)]
+        assert 0.18 - 0.15 <= DUAL_ROUTE_THRESHOLD  # would be dual if confident
         decision = decide_route(scores)
         assert decision["mode"] == "fallback"
 
@@ -152,7 +152,7 @@ class TestDecideRoute:
 
     def test_fallback_scores_carried_forward(self):
         """Original scores are preserved in the fallback decision dict."""
-        scores = [("shopping", 0.20), ("search", 0.15)]
+        scores = [("shopping", 0.15), ("search", 0.10)]
         decision = decide_route(scores)
         assert decision["mode"] == "fallback"
         assert decision["scores"] is scores

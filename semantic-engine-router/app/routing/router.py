@@ -49,11 +49,18 @@ Gap (top-1 score − top-2 score) at or below which BOTH engines are queried.
 Raise this to make dual-routing more aggressive; lower it to make it rarer.
 """
 
-MIN_CONFIDENCE_THRESHOLD: float = 0.35
+MIN_CONFIDENCE_THRESHOLD: float = 0.20
 """
 Minimum top-1 score for any specialist engine to be trusted.
 Below this, the query is ambiguous / out-of-domain and falls back to plain
 Google Search.  Raise to make fallback more frequent; lower to reduce it.
+
+Calibration history:
+  0.35 → Phase 11 benchmark showed 52.8% accuracy — too many valid
+         single-engine queries (scholar, local, search) scoring 0.20–0.34
+         were incorrectly routed to fallback.
+  0.20 → Lowered after Phase 11 miss analysis. Fallback reserved for
+         queries where even the best specialist score is < 0.20.
 """
 
 # ---------------------------------------------------------------------------

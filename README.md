@@ -374,8 +374,36 @@ pytest -m live
 | **6** ✅ | Pydantic schema (`EngineResponse`/`EngineResult`) + adapter layer |
 | **7** ✅ | Local + Patents engines + `POST /engines/local` + `POST /engines/patents` |
 | **8** ✅ | Dual-engine routing — `decide_route()` + `async execute_route()` — 235 tests |
-| 9 | Fallback to base Google Search when all engines score low |
-| … | Further phases |
+| **9** ✅ | Fallback routing — `search_fallback()`, `MIN_CONFIDENCE_THRESHOLD` — 269 tests |
+| **10** ✅ | Hand-labeled eval dataset — 53 queries across 3 routing modes |
+| 11 | Routing-accuracy benchmark (precision / recall per category) |
+| 12 | Token / latency benchmark |
+
+---
+
+## Evaluation Dataset
+
+Located at [`app/testing/eval_dataset.py`](file:///c:/Nexus_MCP/semantic-engine-router/app/testing/eval_dataset.py), the `FULL_EVAL_SET` is a hand-labeled, held-out benchmark of **53 queries** used by Phase 11+ benchmarks.
+
+| Subset | Count | Description |
+|---|---|---|
+| Single-engine | 40 | 8 per category (shopping, scholar, local, patents, search) — 6 clear + 2 borderline |
+| Dual-engine | 8 | Wrapped from `AMBIGUOUS_TEST_QUERIES`; each has `expected_dual_categories=[cat1, cat2]` |
+| Fallback | 5 | Generic/low-confidence queries that should score below `MIN_CONFIDENCE_THRESHOLD` |
+| **Total** | **53** | |
+
+**Held-out guarantee:** all 53 queries are structurally verified to have zero overlap with `SEED_PHRASES` via a normalised string comparison (lowercase + strip trailing punctuation). This is enforced by `tests/test_eval_dataset.py` (228 assertions, 0.6 s).
+
+```python
+from app.testing.eval_dataset import FULL_EVAL_SET, TestCase
+
+# TestCase fields:
+#   query                  str
+#   expected_mode          "single" | "dual" | "fallback"
+#   expected_category      str | None        # set for single/fallback
+#   expected_dual_categories list[str] | None  # [cat1, cat2] for dual
+#   notes                  str              # nuance explanation for borderline cases
+```
 
 ---
 

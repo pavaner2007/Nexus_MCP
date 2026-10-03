@@ -1,14 +1,22 @@
 # Semantic Engine Router
 
-> **SerpApi India Hackathon 2026 — Phase 8**
+> **SerpApi India Hackathon 2026 — Phase 11**
 
 ## What Is This?
 
-**Semantic Engine Router** is an MCP-native routing layer that sits between LLM agents and the SerpApi ecosystem. Instead of exposing 15–20 separate SerpApi engine tools to an LLM, this project exposes **one tool** (`Universal_Search`) and uses a lightweight embedding-based semantic classifier to route each natural-language query to the correct SerpApi engine internally (Google Shopping, Scholar, Local, Patents, or base Search).
+**Semantic Engine Router** is an MCP-native routing layer that sits between LLM agents and the SerpApi ecosystem. Instead of exposing 15–20 separate SerpApi engine tools to an LLM, this project exposes **one tool** (`Universal_Search`) and uses a lightweight embedding-based semantic classifier to route each natural-language query to the correct SerpApi engine internally.
 
-The classifier uses [`all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) (384-dimensional embeddings) to compute cosine similarity between an incoming query and pre-built per-category centroid vectors. Centroids are cached to disk on first run and reloaded instantly on subsequent server restarts.
+### Routing Modes
 
-Every engine returns a **typed, validated `EngineResponse`** (Pydantic V2) so the schema is consistent whether you're calling a REST endpoint or using the MCP tool from Claude Desktop.
+| Mode | Trigger | Engines Used |
+|---|---|---|
+| **Single** | Top score ≥ 0.20, gap > 0.15 | One specialist engine |
+| **Dual** | Top score ≥ 0.20, gap ≤ 0.15 | Two engines in parallel via `asyncio.gather` |
+| **Fallback** | Top score < 0.20 | Base Google Search |
+
+The classifier uses [`all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) (384-dim embeddings) and cosine similarity against pre-built per-category centroid vectors. Centroids are cached to disk on first run and reloaded instantly on subsequent starts.
+
+Every engine returns a **typed, validated `EngineResponse`** (Pydantic V2) — consistent schema whether calling a REST endpoint or using the MCP tool from Claude Desktop.
 
 ---
 
@@ -21,7 +29,7 @@ semantic-engine-router/
 │   ├── main.py                 # FastAPI app + all endpoints
 │   ├── schemas.py              # Shared EngineResult + EngineResponse Pydantic models
 │   ├── classifier/
-│   │   ├── seed_data.py        # Seed phrases (5 categories × 45+ queries)
+│   │   ├── seed_data.py        # Seed phrases (5 categories × 45+ queries each)
 │   │   ├── embedder.py         # Lazy-loading SentenceTransformer singleton
 │   │   ├── centroids.py        # Build / save / load centroid vectors (.npz)
 │   │   └── classify.py         # Cosine similarity scoring + classify_top()
@@ -30,9 +38,13 @@ semantic-engine-router/
 │   │   ├── shopping.py         # Google Shopping engine → EngineResponse
 │   │   ├── scholar.py          # Google Scholar engine → EngineResponse
 │   │   ├── local.py            # Google Local engine → EngineResponse
-│   │   └── patents.py          # Google Patents engine → EngineResponse
+│   │   ├── patents.py          # Google Patents engine → EngineResponse
+│   │   └── fallback.py         # Base Google Search fallback → EngineResponse
 │   ├── routing/
 │   │   └── router.py           # decide_route() + async execute_route()
+│   ├── testing/
+│   │   ├── eval_dataset.py     # 53-entry hand-labeled FULL_EVAL_SET
+│   │   └── benchmark_accuracy.py  # Phase 11 accuracy benchmark CLI
 │   └── mcp/
 │       ├── server.py           # FastMCP server — Universal_Search tool
 │       └── __main__.py         # Entry point: python -m app.mcp
@@ -46,8 +58,11 @@ semantic-engine-router/
 │   ├── test_scholar_engine.py  # Scholar engine — mocked + live tests
 │   ├── test_local_engine.py    # Local engine — mocked + live tests
 │   ├── test_patents_engine.py  # Patents engine — mocked + live tests
-│   ├── test_router.py          # decide_route + execute_route (single/dual/partial-fail)
-│   └── test_mcp_handler.py     # Universal_Search routing, dual mode, metadata injection
+│   ├── test_fallback_engine.py # Fallback search engine — mocked + live tests
+│   ├── test_router.py          # decide_route + execute_route (single/dual/fallback)
+│   ├── test_mcp_handler.py     # Universal_Search routing — single/dual/fallback
+│   ├── test_eval_dataset.py    # 228 structural assertions on FULL_EVAL_SET
+│   └── test_benchmark_accuracy.py  # Benchmark return-shape + accounting integrity
 ├── pytest.ini                  # Registers 'live' marker, suppresses warnings
 ├── .env.example
 ├── .gitignore
@@ -57,9 +72,9 @@ semantic-engine-router/
 
 ---
 
-## Shared Response Schema (Phase 6)
+## Shared Response Schema
 
-All engines now return a validated **`EngineResponse`** Pydantic model. The shape is identical whether you call the REST API or use `Universal_Search` via MCP.
+All engines return a validated **`EngineResponse`** Pydantic model. The shape is identical whether you call the REST API or use `Universal_Search` via MCP.
 
 ### EngineResponse
 
@@ -76,7 +91,9 @@ All engines now return a validated **`EngineResponse`** Pydantic model. The shap
 }
 ```
 
-> `classified_as`, `confidence`, and `route_detail` are `null` when calling engine endpoints directly. They are populated by the MCP router after classification. In dual-engine mode `route_detail` carries per-engine scores and any partial failure notes.
+> `classified_as`, `confidence`, and `route_detail` are `null` when calling engine endpoints directly.
+> In dual-engine mode `route_detail` carries per-engine scores and any partial-failure notes.
+> In fallback mode `classified_as` is `"search (fallback)"` and `route_detail` includes a `fallback_reason` string.
 
 ### EngineResult
 
@@ -96,7 +113,7 @@ All engines now return a validated **`EngineResponse`** Pydantic model. The shap
 }
 ```
 
-Common fields (`title`, `snippet`, `link`, `thumbnail`) are always at the top level. Engine-specific extras (`price`, `authors`, `cited_by_count`, etc.) live in `metadata` so the envelope stays stable as new engines are added.
+Common fields (`title`, `snippet`, `link`, `thumbnail`) are always at the top level. Engine-specific extras live in `metadata` so the envelope stays stable as new engines are added.
 
 ---
 
@@ -138,9 +155,6 @@ Common fields (`title`, `snippet`, `link`, `thumbnail`) are always at the top le
   "success": true,
   "engine": "shopping",
   "result_count": 5,
-  "error": null,
-  "classified_as": null,
-  "confidence": null,
   "results": [
     {
       "title": "Apple iPhone 15 Pro 256GB",
@@ -148,39 +162,6 @@ Common fields (`title`, `snippet`, `link`, `thumbnail`) are always at the top le
       "link": "https://...",
       "thumbnail": "https://...",
       "metadata": { "price": "$999.00", "extracted_price": 999.0, "source": "Best Buy", "rating": 4.8, "reviews": 1234 }
-    }
-  ]
-}
-```
-
-### POST /engines/scholar
-
-**Request**
-```json
-{ "query": "attention is all you need transformer", "num_results": 5 }
-```
-**Response**
-```json
-{
-  "success": true,
-  "engine": "scholar",
-  "result_count": 5,
-  "error": null,
-  "classified_as": null,
-  "confidence": null,
-  "results": [
-    {
-      "title": "Attention Is All You Need",
-      "snippet": "The dominant sequence transduction models are based on complex recurrent...",
-      "link": "https://arxiv.org/abs/1706.03762",
-      "thumbnail": null,
-      "metadata": {
-        "authors": ["Ashish Vaswani", "Noam Shazeer", "Niki Parmar"],
-        "publication": "Advances in neural information processing systems, 2017",
-        "year": "2017",
-        "cited_by_count": 98765,
-        "pdf_link": "https://arxiv.org/pdf/1706.03762"
-      }
     }
   ]
 }
@@ -251,7 +232,7 @@ Start the MCP server directly (used by Claude Desktop / Cursor):
 python -m app.mcp
 ```
 
-> Make sure your `.env` file has a real `SERPAPI_KEY` before running. The server loads it automatically via `python-dotenv`.
+> Make sure your `.env` file has a real `SERPAPI_KEY` before running.
 
 ---
 
@@ -282,42 +263,52 @@ After saving, restart Claude Desktop. The **Universal_Search** tool will appear 
 
 ---
 
-## Dual-Engine Routing (Phase 8)
-
-When the top-2 classifier scores are within **0.15** of each other, both engines are queried **concurrently** via `asyncio.gather` and their results are merged:
+## How Routing Works
 
 ```
-Universal_Search("Tesla showroom locations near me and current lease pricing")
-→ classify_top → [("local", 0.445), ("shopping", 0.377)]  gap=0.068 ≤ 0.15
-→ DUAL route: asyncio.gather(search_local(...), search_shopping(...))
-→ EngineResponse(
-      engine="dual:local+shopping",
-      result_count=12,
-      classified_as="dual",
-      confidence=0.411,
-      route_detail={"local": 0.445, "shopping": 0.377},
-      results=[
-          {..., metadata: {"source_engine": "local"}},    # showroom locations
-          {..., metadata: {"source_engine": "shopping"}},  # lease pricing
-      ]
-  )
+Universal_Search("Tesla showroom near me and current lease pricing")
+  |
+  +---> classify_top(query, centroids, top_n=2)
+  |       => [("local", 0.445), ("shopping", 0.377)]
+  |
+  +---> decide_route(scores)
+  |
+  |  top_score=0.445 >= MIN_CONFIDENCE_THRESHOLD (0.20)?  YES
+  |  gap = 0.445 - 0.377 = 0.068 <= DUAL_ROUTE_THRESHOLD (0.15)?  YES
+  |       => mode="dual"
+  |
+  +---> execute_route()
+          asyncio.gather(search_local(...), search_shopping(...))
+          => EngineResponse(
+               engine="dual:local+shopping",
+               classified_as="dual",
+               confidence=0.411,    # average of top-2
+               route_detail={"local": 0.445, "shopping": 0.377},
+               results=[...local results..., ...shopping results...]
+             )
 ```
 
-| Query | Mode | Engines | Gap |
+### Routing decision table
+
+| top_score | gap | Mode |
+|---|---|---|
+| < 0.20 | any | **fallback** → base Google Search |
+| >= 0.20 | <= 0.15 | **dual** → two engines in parallel |
+| >= 0.20 | > 0.15 | **single** → top-1 engine |
+
+### Real routing examples
+
+| Query | Mode | Engine(s) | Gap |
 |---|---|---|---|
-| "hospitals in Boston ratings + hours" | **DUAL** | local + shopping | 0.145 |
-| "Tesla showroom + lease pricing" | **DUAL** | local + shopping | 0.068 |
-| "mRNA vaccine prior art universities" | **DUAL** | patents + scholar | 0.057 |
-| "social media addiction research" | **DUAL** | scholar + search | 0.098 |
-| "CRISPR patents and research" | single | patents | 0.254 |
-| "M3 MacBook Pro performance + price" | single | shopping | 0.323 |
-
-**Try asking Claude:**
-- *"What's the price of iPhone 15 Pro?"* → single → Shopping
-- *"Recent papers on transformer attention"* → single → Scholar
-- *"Coffee shops near me"* → single → Local
-- *"Tesla showroom locations and lease deals"* → **dual** → Local + Shopping
-- *"Prior art for mRNA vaccine delivery at US universities"* → **dual** → Patents + Scholar
+| "price of iPhone 15" | single | shopping | — |
+| "recent papers on transformer attention" | single | scholar | — |
+| "coffee shops near me" | single | local | — |
+| "who holds the CRISPR patent" | single | patents | — |
+| "Tesla showroom + lease pricing" | **dual** | local + shopping | 0.068 |
+| "hospitals in Boston ratings + hours" | **dual** | local + shopping | 0.145 |
+| "mRNA vaccine prior art at universities" | **dual** | patents + scholar | 0.057 |
+| "what is the temperature in Hyderabad" | **fallback** | search | — |
+| "convert 500 USD to INR" | **fallback** | search | — |
 
 ---
 
@@ -326,7 +317,7 @@ Universal_Search("Tesla showroom locations near me and current lease pricing")
 Tests inject a dummy `SERPAPI_KEY` automatically — **no `.env` file needed** for the fast suite:
 
 ```bash
-# Fast suite — fully mocked, no network/API key required (235 tests)
+# Fast suite — fully mocked, no network/API key required
 pytest -m "not live"
 
 # With stdout — shows ambiguous query dual-route diagnostic
@@ -336,54 +327,38 @@ pytest -m "not live" -s
 pytest -m live
 ```
 
-### Test Coverage by Module
+### Test Coverage by Module (514 tests total)
 
 | Test File | Tests | What It Covers |
 |---|---|---|
 | `test_health.py` | 1 | `/health` liveness probe |
-| `test_seed_data.py` | 12 | SEED_PHRASES structure validation |
+| `test_seed_data.py` | 12 | `SEED_PHRASES` structure validation |
 | `test_classifier.py` | 16 | Centroid shape, scoring, `/classify` endpoint |
 | `test_adapters.py` | 66 | All 4 adapter functions — pure unit tests |
 | `test_shopping_engine.py` | 16 | Shopping engine — trim, mock, endpoint, live |
 | `test_scholar_engine.py` | 27 | Scholar engine — trim, extract helpers, mock, endpoint, live |
 | `test_local_engine.py` | 20 | Local engine — trim, mock, endpoint, live |
 | `test_patents_engine.py` | 21 | Patents engine — trim, mock, endpoint, live |
-| `test_router.py` | 24 | `decide_route` threshold logic, `execute_route` single/dual/partial-fail |
-| `test_mcp_handler.py` | 12 | `Universal_Search` single + dual routing, metadata injection |
+| `test_fallback_engine.py` | 20 | Fallback search engine — mock, answer_box, live |
+| `test_router.py` | 50 | `decide_route` thresholds, `execute_route` single/dual/fallback |
+| `test_mcp_handler.py` | 24 | `Universal_Search` single/dual/fallback routing + metadata |
+| `test_eval_dataset.py` | 228 | Structural validation of `FULL_EVAL_SET` (53 entries) |
+| `test_benchmark_accuracy.py` | 13 | Benchmark return-shape + accounting integrity |
 
-### Performance Benchmarks
+### Performance
 
 | Metric | Result |
 |--------|--------|
-| `universal_search()` end-to-end (cached centroids) | ~15 ms classify + engine latency |
 | `classify()` warm latency | ~13 ms per query |
 | Centroid build (cold start) | ~58 s (model download + encode) |
 | Centroid load (cached) | < 1 s |
-
----
-
-## Roadmap
-
-| Phase | Description |
-|-------|-------------|
-| **1** ✅ | Project scaffold + seed-phrase dataset |
-| **2** ✅ | Embedding classifier — centroid scoring + `POST /classify` |
-| **3** ✅ | Google Shopping engine + `POST /engines/shopping` |
-| **4** ✅ | Google Scholar engine + `POST /engines/scholar` |
-| **5** ✅ | MCP server — `Universal_Search` tool, classifier → engine routing |
-| **6** ✅ | Pydantic schema (`EngineResponse`/`EngineResult`) + adapter layer |
-| **7** ✅ | Local + Patents engines + `POST /engines/local` + `POST /engines/patents` |
-| **8** ✅ | Dual-engine routing — `decide_route()` + `async execute_route()` — 235 tests |
-| **9** ✅ | Fallback routing — `search_fallback()`, `MIN_CONFIDENCE_THRESHOLD` — 269 tests |
-| **10** ✅ | Hand-labeled eval dataset — 53 queries across 3 routing modes |
-| **11** ✅ | Routing-accuracy benchmark — 58.5% baseline, `MIN_CONFIDENCE_THRESHOLD` calibrated to 0.20 — 514 tests |
-| 12 | Token / latency benchmark |
+| Benchmark CLI (`python -m app.testing.benchmark_accuracy`) | ~39 s (53 queries, model warm) |
 
 ---
 
 ## Evaluation Dataset
 
-Located at [`app/testing/eval_dataset.py`](file:///c:/Nexus_MCP/semantic-engine-router/app/testing/eval_dataset.py), the `FULL_EVAL_SET` is a hand-labeled, held-out benchmark of **53 queries** used by Phase 11+ benchmarks.
+Located at `app/testing/eval_dataset.py`, the `FULL_EVAL_SET` is a **53-entry hand-labeled benchmark** used by Phase 11+ accuracy tests.
 
 | Subset | Count | Description |
 |---|---|---|
@@ -392,17 +367,17 @@ Located at [`app/testing/eval_dataset.py`](file:///c:/Nexus_MCP/semantic-engine-
 | Fallback | 5 | Generic/low-confidence queries that should score below `MIN_CONFIDENCE_THRESHOLD` |
 | **Total** | **53** | |
 
-**Held-out guarantee:** all 53 queries are structurally verified to have zero overlap with `SEED_PHRASES` via a normalised string comparison (lowercase + strip trailing punctuation). This is enforced by `tests/test_eval_dataset.py` (228 assertions, 0.6 s).
+**Held-out guarantee:** all 53 queries are verified to have zero overlap with `SEED_PHRASES` via normalised string comparison (lowercase + strip trailing punctuation). Enforced by `test_eval_dataset.py`.
 
 ```python
 from app.testing.eval_dataset import FULL_EVAL_SET, TestCase
 
 # TestCase fields:
-#   query                  str
-#   expected_mode          "single" | "dual" | "fallback"
-#   expected_category      str | None        # set for single/fallback
+#   query                    str
+#   expected_mode            "single" | "dual" | "fallback"
+#   expected_category        str | None        # set for single/fallback
 #   expected_dual_categories list[str] | None  # [cat1, cat2] for dual
-#   notes                  str              # nuance explanation for borderline cases
+#   notes                    str               # nuance explanation for borderline cases
 ```
 
 ---
@@ -429,11 +404,31 @@ Runs all 53 `FULL_EVAL_SET` queries through the real classifier + router pipelin
 | **Overall** | **53** | **31** | **58.5%** |
 
 **Key failure modes identified:**
-- `search` (0%): the `search` centroid is inherently low-scoring; queries either fall below threshold (→ fallback) or get dual-routed with scholar.
-- `scholar` (50%): very specific academic queries (preprints, systematic reviews) score below 0.20.
-- 4 of 8 `dual` misses are **correct routing** — the classifier correctly identified a dominant single engine where the eval label expected dual.
 
-> `MIN_CONFIDENCE_THRESHOLD` was calibrated from `0.35` → `0.20` after Phase 11 revealed 0.35 was routing valid single-engine queries to fallback.
+- **`search` (0%):** The `search` centroid scores low across the board; queries either fall below the confidence threshold (routed to fallback) or get dual-routed with scholar due to a small gap.
+- **`scholar` (50%):** Very specific academic queries (preprints, systematic reviews) score below 0.20 and fall to fallback.
+- **4 of 8 `dual` misses are correct routing:** The classifier correctly identified a dominant single engine where the eval label expected dual (patents gap too wide to trigger dual).
+
+> `MIN_CONFIDENCE_THRESHOLD` was calibrated from `0.35` to `0.20` after Phase 11 revealed 0.35 was incorrectly routing valid single-engine queries to fallback.
+
+---
+
+## Roadmap
+
+| Phase | Description |
+|-------|-------------|
+| **1** ✅ | Project scaffold + seed-phrase dataset (5 categories × 45+ queries) |
+| **2** ✅ | Embedding classifier — centroid scoring + `POST /classify` |
+| **3** ✅ | Google Shopping engine + `POST /engines/shopping` |
+| **4** ✅ | Google Scholar engine + `POST /engines/scholar` |
+| **5** ✅ | MCP server — `Universal_Search` tool, classifier → engine routing |
+| **6** ✅ | Pydantic schema (`EngineResponse`/`EngineResult`) + adapter layer |
+| **7** ✅ | Local + Patents engines + `POST /engines/local` + `POST /engines/patents` |
+| **8** ✅ | Dual-engine routing — `decide_route()` + `async execute_route()` |
+| **9** ✅ | Fallback routing — `search_fallback()`, `MIN_CONFIDENCE_THRESHOLD` — 269 tests |
+| **10** ✅ | Hand-labeled eval dataset — 53 queries across 3 routing modes — 497 tests |
+| **11** ✅ | Routing-accuracy benchmark — 58.5% baseline, threshold calibrated 0.35→0.20 — 514 tests |
+| 12 | Token / latency benchmark |
 
 ---
 

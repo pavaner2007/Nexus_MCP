@@ -1,18 +1,16 @@
 # Semantic Engine Router
 
-> **SerpApi India Hackathon 2026 — Phase 12**
-
 ## What Is This?
 
 **Semantic Engine Router** is an MCP-native routing layer that sits between LLM agents and the SerpApi ecosystem. Instead of exposing 15–20 separate SerpApi engine tools to an LLM, this project exposes **one tool** (`Universal_Search`) and uses a lightweight embedding-based semantic classifier to route each natural-language query to the correct SerpApi engine internally.
 
 ### Routing Modes
 
-| Mode | Trigger | Engines Used |
-|---|---|---|
-| **Single** | Top score ≥ 0.20, gap > 0.15 | One specialist engine |
-| **Dual** | Top score ≥ 0.20, gap ≤ 0.15 | Two engines in parallel via `asyncio.gather` |
-| **Fallback** | Top score < 0.20 | Base Google Search |
+| Mode         | Trigger                      | Engines Used                                 |
+| ------------ | ---------------------------- | -------------------------------------------- |
+| **Single**   | Top score ≥ 0.20, gap > 0.15 | One specialist engine                        |
+| **Dual**     | Top score ≥ 0.20, gap ≤ 0.15 | Two engines in parallel via `asyncio.gather` |
+| **Fallback** | Top score < 0.20             | Base Google Search                           |
 
 The classifier uses [`all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) (384-dim embeddings) and cosine similarity against pre-built per-category centroid vectors. Centroids are cached to disk on first run and reloaded instantly on subsequent starts.
 
@@ -124,37 +122,52 @@ Common fields (`title`, `snippet`, `link`, `thumbnail`) are always at the top le
 
 ## API Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET`  | `/health` | Liveness probe → `{"status": "ok"}` |
-| `POST` | `/classify` | Classify a query → per-engine scores + top-2 ranking |
-| `POST` | `/engines/shopping` | Query Google Shopping → `EngineResponse` |
-| `POST` | `/engines/scholar` | Query Google Scholar → `EngineResponse` |
-| `POST` | `/engines/local` | Query Google Local → `EngineResponse` |
-| `POST` | `/engines/patents` | Query Google Patents → `EngineResponse` |
+| Method | Path                | Description                                          |
+| ------ | ------------------- | ---------------------------------------------------- |
+| `GET`  | `/health`           | Liveness probe → `{"status": "ok"}`                  |
+| `POST` | `/classify`         | Classify a query → per-engine scores + top-2 ranking |
+| `POST` | `/engines/shopping` | Query Google Shopping → `EngineResponse`             |
+| `POST` | `/engines/scholar`  | Query Google Scholar → `EngineResponse`              |
+| `POST` | `/engines/local`    | Query Google Local → `EngineResponse`                |
+| `POST` | `/engines/patents`  | Query Google Patents → `EngineResponse`              |
 
 ### POST /classify
 
 **Request**
+
 ```json
 { "query": "cheapest noise-cancelling headphones under $200" }
 ```
+
 **Response**
+
 ```json
 {
   "query": "cheapest noise-cancelling headphones under $200",
-  "scores": { "shopping": 0.68, "search": 0.21, "scholar": 0.18, "local": 0.12, "patents": 0.09 },
-  "top_2": [["shopping", 0.68], ["search", 0.21]]
+  "scores": {
+    "shopping": 0.68,
+    "search": 0.21,
+    "scholar": 0.18,
+    "local": 0.12,
+    "patents": 0.09
+  },
+  "top_2": [
+    ["shopping", 0.68],
+    ["search", 0.21]
+  ]
 }
 ```
 
 ### POST /engines/shopping
 
 **Request**
+
 ```json
 { "query": "iPhone 15 Pro", "num_results": 5 }
 ```
+
 **Response**
+
 ```json
 {
   "success": true,
@@ -166,15 +179,28 @@ Common fields (`title`, `snippet`, `link`, `thumbnail`) are always at the top le
       "snippet": "$999.00 from Best Buy",
       "link": "https://...",
       "thumbnail": "https://...",
-      "metadata": { "price": "$999.00", "extracted_price": 999.0, "source": "Best Buy", "rating": 4.8, "reviews": 1234 }
+      "metadata": {
+        "price": "$999.00",
+        "extracted_price": 999.0,
+        "source": "Best Buy",
+        "rating": 4.8,
+        "reviews": 1234
+      }
     }
   ]
 }
 ```
 
 **Error contract (all engines):**
+
 ```json
-{ "success": false, "engine": "scholar", "error": "<reason>", "results": [], "result_count": 0 }
+{
+  "success": false,
+  "engine": "scholar",
+  "error": "<reason>",
+  "results": [],
+  "result_count": 0
+}
 ```
 
 ---
@@ -295,25 +321,25 @@ Universal_Search("Tesla showroom near me and current lease pricing")
 
 ### Routing decision table
 
-| top_score | gap | Mode |
-|---|---|---|
-| < 0.20 | any | **fallback** → base Google Search |
-| >= 0.20 | <= 0.15 | **dual** → two engines in parallel |
-| >= 0.20 | > 0.15 | **single** → top-1 engine |
+| top_score | gap     | Mode                               |
+| --------- | ------- | ---------------------------------- |
+| < 0.20    | any     | **fallback** → base Google Search  |
+| >= 0.20   | <= 0.15 | **dual** → two engines in parallel |
+| >= 0.20   | > 0.15  | **single** → top-1 engine          |
 
 ### Real routing examples
 
-| Query | Mode | Engine(s) | Gap |
-|---|---|---|---|
-| "price of iPhone 15" | single | shopping | — |
-| "recent papers on transformer attention" | single | scholar | — |
-| "coffee shops near me" | single | local | — |
-| "who holds the CRISPR patent" | single | patents | — |
-| "Tesla showroom + lease pricing" | **dual** | local + shopping | 0.068 |
-| "hospitals in Boston ratings + hours" | **dual** | local + shopping | 0.145 |
-| "mRNA vaccine prior art at universities" | **dual** | patents + scholar | 0.057 |
-| "what is the temperature in Hyderabad" | **fallback** | search | — |
-| "convert 500 USD to INR" | **fallback** | search | — |
+| Query                                    | Mode         | Engine(s)         | Gap   |
+| ---------------------------------------- | ------------ | ----------------- | ----- |
+| "price of iPhone 15"                     | single       | shopping          | —     |
+| "recent papers on transformer attention" | single       | scholar           | —     |
+| "coffee shops near me"                   | single       | local             | —     |
+| "who holds the CRISPR patent"            | single       | patents           | —     |
+| "Tesla showroom + lease pricing"         | **dual**     | local + shopping  | 0.068 |
+| "hospitals in Boston ratings + hours"    | **dual**     | local + shopping  | 0.145 |
+| "mRNA vaccine prior art at universities" | **dual**     | patents + scholar | 0.057 |
+| "what is the temperature in Hyderabad"   | **fallback** | search            | —     |
+| "convert 500 USD to INR"                 | **fallback** | search            | —     |
 
 ---
 
@@ -334,34 +360,34 @@ pytest -m live
 
 ### Test Coverage by Module (514 tests total)
 
-| Test File | Tests | What It Covers |
-|---|---|---|
-| `test_health.py` | 1 | `/health` liveness probe |
-| `test_seed_data.py` | 12 | `SEED_PHRASES` structure validation |
-| `test_classifier.py` | 16 | Centroid shape, scoring, `/classify` endpoint |
-| `test_adapters.py` | 66 | All 4 adapter functions — pure unit tests |
-| `test_shopping_engine.py` | 16 | Shopping engine — trim, mock, endpoint, live |
-| `test_scholar_engine.py` | 27 | Scholar engine — trim, extract helpers, mock, endpoint, live |
-| `test_local_engine.py` | 20 | Local engine — trim, mock, endpoint, live |
-| `test_patents_engine.py` | 21 | Patents engine — trim, mock, endpoint, live |
-| `test_fallback_engine.py` | 20 | Fallback search engine — mock, answer_box, live |
-| `test_router.py` | 50 | `decide_route` thresholds, `execute_route` single/dual/fallback |
-| `test_mcp_handler.py` | 24 | `Universal_Search` single/dual/fallback routing + metadata |
-| `test_eval_dataset.py` | 228 | Structural validation of `FULL_EVAL_SET` (53 entries) |
-| `test_benchmark_accuracy.py` | 13 | Benchmark return-shape + accounting integrity |
-| `test_benchmark_tokens.py` | 20 | Token counting, >80% reduction, schema structure |
-| `test_benchmark_latency.py` | 15 | Mocked latency benchmark — shape, ordering, meta |
+| Test File                    | Tests | What It Covers                                                  |
+| ---------------------------- | ----- | --------------------------------------------------------------- |
+| `test_health.py`             | 1     | `/health` liveness probe                                        |
+| `test_seed_data.py`          | 12    | `SEED_PHRASES` structure validation                             |
+| `test_classifier.py`         | 16    | Centroid shape, scoring, `/classify` endpoint                   |
+| `test_adapters.py`           | 66    | All 4 adapter functions — pure unit tests                       |
+| `test_shopping_engine.py`    | 16    | Shopping engine — trim, mock, endpoint, live                    |
+| `test_scholar_engine.py`     | 27    | Scholar engine — trim, extract helpers, mock, endpoint, live    |
+| `test_local_engine.py`       | 20    | Local engine — trim, mock, endpoint, live                       |
+| `test_patents_engine.py`     | 21    | Patents engine — trim, mock, endpoint, live                     |
+| `test_fallback_engine.py`    | 20    | Fallback search engine — mock, answer_box, live                 |
+| `test_router.py`             | 50    | `decide_route` thresholds, `execute_route` single/dual/fallback |
+| `test_mcp_handler.py`        | 24    | `Universal_Search` single/dual/fallback routing + metadata      |
+| `test_eval_dataset.py`       | 228   | Structural validation of `FULL_EVAL_SET` (53 entries)           |
+| `test_benchmark_accuracy.py` | 13    | Benchmark return-shape + accounting integrity                   |
+| `test_benchmark_tokens.py`   | 20    | Token counting, >80% reduction, schema structure                |
+| `test_benchmark_latency.py`  | 15    | Mocked latency benchmark — shape, ordering, meta                |
 
 ### Performance
 
-| Metric | Result |
-|--------|--------|
-| `classify()` warm latency | ~13 ms per query |
-| Centroid build (cold start) | ~58 s (model download + encode) |
-| Centroid load (cached) | < 1 s |
-| Benchmark CLI (`python -m app.testing.benchmark_accuracy`) | ~39 s (53 queries, model warm) |
-| Token benchmark (`python -m app.testing.benchmark_tokens`) | < 1 s |
-| Token reduction (1 tool vs 20 tools) | **97.4%** (7,116 → 187 tokens) |
+| Metric                                                     | Result                          |
+| ---------------------------------------------------------- | ------------------------------- |
+| `classify()` warm latency                                  | ~13 ms per query                |
+| Centroid build (cold start)                                | ~58 s (model download + encode) |
+| Centroid load (cached)                                     | < 1 s                           |
+| Benchmark CLI (`python -m app.testing.benchmark_accuracy`) | ~39 s (53 queries, model warm)  |
+| Token benchmark (`python -m app.testing.benchmark_tokens`) | < 1 s                           |
+| Token reduction (1 tool vs 20 tools)                       | **97.4%** (7,116 → 187 tokens)  |
 
 ---
 
@@ -369,12 +395,12 @@ pytest -m live
 
 Located at `app/testing/eval_dataset.py`, the `FULL_EVAL_SET` is a **53-entry hand-labeled benchmark** used by Phase 11+ accuracy tests.
 
-| Subset | Count | Description |
-|---|---|---|
-| Single-engine | 40 | 8 per category (shopping, scholar, local, patents, search) — 6 clear + 2 borderline |
-| Dual-engine | 8 | Wrapped from `AMBIGUOUS_TEST_QUERIES`; each has `expected_dual_categories=[cat1, cat2]` |
-| Fallback | 5 | Generic/low-confidence queries that should score below `MIN_CONFIDENCE_THRESHOLD` |
-| **Total** | **53** | |
+| Subset        | Count  | Description                                                                             |
+| ------------- | ------ | --------------------------------------------------------------------------------------- |
+| Single-engine | 40     | 8 per category (shopping, scholar, local, patents, search) — 6 clear + 2 borderline     |
+| Dual-engine   | 8      | Wrapped from `AMBIGUOUS_TEST_QUERIES`; each has `expected_dual_categories=[cat1, cat2]` |
+| Fallback      | 5      | Generic/low-confidence queries that should score below `MIN_CONFIDENCE_THRESHOLD`       |
+| **Total**     | **53** |                                                                                         |
 
 **Held-out guarantee:** all 53 queries are verified to have zero overlap with `SEED_PHRASES` via normalised string comparison (lowercase + strip trailing punctuation). Enforced by `test_eval_dataset.py`.
 
@@ -401,16 +427,16 @@ Runs all 53 `FULL_EVAL_SET` queries through the real classifier + router pipelin
 
 **Phase 11 baseline results (`MIN_CONFIDENCE_THRESHOLD = 0.20`):**
 
-| Category | Total | Correct | Accuracy |
-|---|---|---|---|
-| shopping | 8 | 7 | 87.5% |
-| scholar | 8 | 4 | 50.0% |
-| local | 8 | 5 | 62.5% |
-| patents | 8 | 7 | 87.5% |
-| search | 8 | 0 | 0.0% |
-| dual | 8 | 4 | 50.0% |
-| fallback | 5 | 4 | 80.0% |
-| **Overall** | **53** | **31** | **58.5%** |
+| Category    | Total  | Correct | Accuracy  |
+| ----------- | ------ | ------- | --------- |
+| shopping    | 8      | 7       | 87.5%     |
+| scholar     | 8      | 4       | 50.0%     |
+| local       | 8      | 5       | 62.5%     |
+| patents     | 8      | 7       | 87.5%     |
+| search      | 8      | 0       | 0.0%      |
+| dual        | 8      | 4       | 50.0%     |
+| fallback    | 5      | 4       | 80.0%     |
+| **Overall** | **53** | **31**  | **58.5%** |
 
 **Key failure modes identified:**
 
@@ -424,19 +450,19 @@ Runs all 53 `FULL_EVAL_SET` queries through the real classifier + router pipelin
 
 ## Roadmap
 
-| Phase | Description |
-|-------|-------------|
-| **1** ✅ | Project scaffold + seed-phrase dataset (5 categories × 45+ queries) |
-| **2** ✅ | Embedding classifier — centroid scoring + `POST /classify` |
-| **3** ✅ | Google Shopping engine + `POST /engines/shopping` |
-| **4** ✅ | Google Scholar engine + `POST /engines/scholar` |
-| **5** ✅ | MCP server — `Universal_Search` tool, classifier → engine routing |
-| **6** ✅ | Pydantic schema (`EngineResponse`/`EngineResult`) + adapter layer |
-| **7** ✅ | Local + Patents engines + `POST /engines/local` + `POST /engines/patents` |
-| **8** ✅ | Dual-engine routing — `decide_route()` + `async execute_route()` |
-| **9** ✅ | Fallback routing — `search_fallback()`, `MIN_CONFIDENCE_THRESHOLD` — 269 tests |
-| **10** ✅ | Hand-labeled eval dataset — 53 queries across 3 routing modes — 497 tests |
-| **11** ✅ | Routing-accuracy benchmark — 58.5% baseline, threshold calibrated 0.35→0.20 — 514 tests |
+| Phase     | Description                                                                                      |
+| --------- | ------------------------------------------------------------------------------------------------ |
+| **1** ✅  | Project scaffold + seed-phrase dataset (5 categories × 45+ queries)                              |
+| **2** ✅  | Embedding classifier — centroid scoring + `POST /classify`                                       |
+| **3** ✅  | Google Shopping engine + `POST /engines/shopping`                                                |
+| **4** ✅  | Google Scholar engine + `POST /engines/scholar`                                                  |
+| **5** ✅  | MCP server — `Universal_Search` tool, classifier → engine routing                                |
+| **6** ✅  | Pydantic schema (`EngineResponse`/`EngineResult`) + adapter layer                                |
+| **7** ✅  | Local + Patents engines + `POST /engines/local` + `POST /engines/patents`                        |
+| **8** ✅  | Dual-engine routing — `decide_route()` + `async execute_route()`                                 |
+| **9** ✅  | Fallback routing — `search_fallback()`, `MIN_CONFIDENCE_THRESHOLD` — 269 tests                   |
+| **10** ✅ | Hand-labeled eval dataset — 53 queries across 3 routing modes — 497 tests                        |
+| **11** ✅ | Routing-accuracy benchmark — 58.5% baseline, threshold calibrated 0.35→0.20 — 514 tests          |
 | **12** ✅ | Token + latency benchmarks — 97.4% token reduction, async latency across all 3 modes — 544 tests |
 
 ---

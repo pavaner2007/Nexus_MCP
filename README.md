@@ -1,6 +1,6 @@
 # Semantic Engine Router
 
-> **SerpApi India Hackathon 2026 — Phase 11**
+> **SerpApi India Hackathon 2026 — Phase 12**
 
 ## What Is This?
 
@@ -43,8 +43,11 @@ semantic-engine-router/
 │   ├── routing/
 │   │   └── router.py           # decide_route() + async execute_route()
 │   ├── testing/
-│   │   ├── eval_dataset.py     # 53-entry hand-labeled FULL_EVAL_SET
-│   │   └── benchmark_accuracy.py  # Phase 11 accuracy benchmark CLI
+│   │   ├── eval_dataset.py          # 53-entry hand-labeled FULL_EVAL_SET
+│   │   ├── benchmark_accuracy.py    # Phase 11: routing accuracy benchmark CLI
+│   │   ├── mock_tool_schemas.py     # Phase 12: 20 engine schemas + Universal_Search
+│   │   ├── benchmark_tokens.py      # Phase 12A: token-reduction benchmark CLI
+│   │   └── benchmark_latency.py     # Phase 12B: async latency benchmark CLI
 │   └── mcp/
 │       ├── server.py           # FastMCP server — Universal_Search tool
 │       └── __main__.py         # Entry point: python -m app.mcp
@@ -62,7 +65,9 @@ semantic-engine-router/
 │   ├── test_router.py          # decide_route + execute_route (single/dual/fallback)
 │   ├── test_mcp_handler.py     # Universal_Search routing — single/dual/fallback
 │   ├── test_eval_dataset.py    # 228 structural assertions on FULL_EVAL_SET
-│   └── test_benchmark_accuracy.py  # Benchmark return-shape + accounting integrity
+│   ├── test_benchmark_accuracy.py  # Benchmark return-shape + accounting integrity
+│   ├── test_benchmark_tokens.py    # Token count + >80% reduction assertion
+│   └── test_benchmark_latency.py   # Mocked latency benchmark smoke tests
 ├── pytest.ini                  # Registers 'live' marker, suppresses warnings
 ├── .env.example
 ├── .gitignore
@@ -344,6 +349,8 @@ pytest -m live
 | `test_mcp_handler.py` | 24 | `Universal_Search` single/dual/fallback routing + metadata |
 | `test_eval_dataset.py` | 228 | Structural validation of `FULL_EVAL_SET` (53 entries) |
 | `test_benchmark_accuracy.py` | 13 | Benchmark return-shape + accounting integrity |
+| `test_benchmark_tokens.py` | 20 | Token counting, >80% reduction, schema structure |
+| `test_benchmark_latency.py` | 15 | Mocked latency benchmark — shape, ordering, meta |
 
 ### Performance
 
@@ -353,6 +360,8 @@ pytest -m live
 | Centroid build (cold start) | ~58 s (model download + encode) |
 | Centroid load (cached) | < 1 s |
 | Benchmark CLI (`python -m app.testing.benchmark_accuracy`) | ~39 s (53 queries, model warm) |
+| Token benchmark (`python -m app.testing.benchmark_tokens`) | < 1 s |
+| Token reduction (1 tool vs 20 tools) | **97.4%** (7,116 → 187 tokens) |
 
 ---
 
@@ -428,7 +437,7 @@ Runs all 53 `FULL_EVAL_SET` queries through the real classifier + router pipelin
 | **9** ✅ | Fallback routing — `search_fallback()`, `MIN_CONFIDENCE_THRESHOLD` — 269 tests |
 | **10** ✅ | Hand-labeled eval dataset — 53 queries across 3 routing modes — 497 tests |
 | **11** ✅ | Routing-accuracy benchmark — 58.5% baseline, threshold calibrated 0.35→0.20 — 514 tests |
-| 12 | Token / latency benchmark |
+| **12** ✅ | Token + latency benchmarks — 97.4% token reduction, async latency across all 3 modes — 544 tests |
 
 ---
 

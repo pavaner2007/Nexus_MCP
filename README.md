@@ -1,6 +1,6 @@
 # Semantic Engine Router
 
-> **SerpApi India Hackathon 2026 — Phase 13**
+> **SerpApi India Hackathon 2026 — Phase 14**
 
 ## What Is This?
 
@@ -43,7 +43,9 @@ semantic-engine-router/
 │   ├── routing/
 │   │   └── router.py                # decide_route() + async execute_route()
 │   ├── demo/
-│   │   └── service.py               # Phase 13: run_demo_query() — full pipeline in one call
+│   │   ├── service.py               # Phase 13: run_demo_query() — full pipeline in one call
+│   │   ├── benchmark_store.py       # Phase 14: disk-cached benchmark results (no recompute on load)
+│   │   └── cache/                   # JSON cache files (tokens.json, accuracy.json, latency.json)
 │   ├── testing/
 │   │   ├── eval_dataset.py          # 53-entry hand-labeled FULL_EVAL_SET
 │   │   ├── benchmark_accuracy.py    # Phase 11: routing accuracy benchmark CLI
@@ -66,7 +68,13 @@ semantic-engine-router/
 │   │       ├── RouteBadge.tsx       # SINGLE / DUAL / FALLBACK badge + explanation
 │   │       ├── TimingsStrip.tsx     # Classification / engine-call / total ms pills
 │   │       ├── ResultCard.tsx       # Engine-specific metadata rendering
-│   │       └── RawJson.tsx          # Collapsible raw JSON inspector
+│   │       ├── RawJson.tsx          # Collapsible raw JSON inspector
+│   │       └── benchmarks/
+│   │           ├── TokenSection.tsx     # Phase 14: token comparison chart + schema list
+│   │           ├── AccuracySection.tsx  # Phase 14: per-category accuracy chart + misses
+│   │           └── LatencySection.tsx   # Phase 14: latency table + empty state
+│   ├── pages/
+│   │   └── BenchmarksView.tsx       # Phase 14: assembles three benchmark sections
 │   ├── .env.example
 │   ├── tailwind.config.js
 │   └── package.json
@@ -87,7 +95,9 @@ semantic-engine-router/
 │   ├── test_benchmark_accuracy.py
 │   ├── test_benchmark_tokens.py
 │   ├── test_benchmark_latency.py
-│   └── test_demo_service.py         # Phase 13: 21 mocked tests for run_demo_query()
+│   ├── test_demo_service.py         # Phase 13: 21 mocked tests for run_demo_query()
+│   ├── test_benchmark_store.py      # Phase 14: cache write/read/refresh/unavailable (24 tests)
+│   └── test_benchmark_endpoints.py  # Phase 14: 4 benchmark endpoint tests incl. 403 guard (20 tests)
 ├── pytest.ini                  # Registers 'live' marker, suppresses warnings
 ├── .env.example
 ├── .gitignore
@@ -487,6 +497,7 @@ Runs all 53 `FULL_EVAL_SET` queries through the real classifier + router pipelin
 | **11** ✅ | Routing-accuracy benchmark — 58.5% baseline, threshold calibrated 0.35→0.20 — 514 tests          |
 | **12** ✅ | Token + latency benchmarks — 97.4% token reduction, async latency across all 3 modes — 544 tests |
 | **13** ✅ | Live demo UI — React + Vite + Tailwind, `/demo/search` + `/demo/examples`, confidence bars with threshold marker — 565 tests |
+| **14** ✅ | Benchmarks tab — cached token/accuracy/latency endpoints, recharts UI, 403 guard — 593 tests |
 
 ---
 

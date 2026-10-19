@@ -49,3 +49,8 @@ dmypy.json
 
 # ruff / linting
 .ruff_cache/
+
+# Demo benchmark cache — keep .json and .gitkeep, ignore everything else
+semantic-engine-router/app/demo/cache/*
+!semantic-engine-router/app/demo/cache/*.json
+!semantic-engine-router/app/demo/cache/.gitkeep

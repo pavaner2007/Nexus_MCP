@@ -7,9 +7,16 @@ Phase 13 additions
 ------------------
 * CORS middleware for the Vite dev server (default http://localhost:5173).
   Configure allowed origins via the DEMO_CORS_ORIGINS env var
-  (comma-separated list, e.g. "http://localhost:5173,https://my-demo.example.com").
+  (comma-separated list).
 * POST /demo/search   — full pipeline + routing metadata for the UI.
 * GET  /demo/examples — 5 example queries to populate the UI chips.
+
+Phase 14 additions
+------------------
+* GET /demo/benchmarks/tokens       — token comparison (cached).
+* GET /demo/benchmarks/accuracy     — routing accuracy (cached).
+* GET /demo/benchmarks/latency      — latency (cached or unavailable sentinel).
+* GET /demo/benchmarks/tool-schemas — raw schema data for the UI.
 
 Run with:
     uvicorn app.main:app --reload
@@ -23,7 +30,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -69,7 +76,7 @@ app = FastAPI(
         "MCP-native routing layer that maps natural-language queries to the "
         "correct SerpApi engine via a lightweight semantic classifier."
     ),
-    version="0.13.0",
+    version="0.14.0",
     lifespan=lifespan,
 )
 
@@ -130,49 +137,25 @@ async def health_check() -> dict[str, str]:
 
 @app.post("/engines/shopping", response_model=EngineResponse, tags=["Engines"])
 async def shopping_search(body: ShoppingRequest) -> EngineResponse:
-    """
-    Query the Google Shopping SerpApi engine and return trimmed product results.
-
-    * **success** — ``true`` if the call succeeded.
-    * **results** — list of trimmed product objects (title, price, source, link …).
-    * **error** — present only when ``success`` is ``false``.
-    """
+    """Query the Google Shopping SerpApi engine and return trimmed product results."""
     return search_shopping(body.query, num_results=body.num_results)
 
 
 @app.post("/engines/scholar", response_model=EngineResponse, tags=["Engines"])
 async def scholar_search(body: ShoppingRequest) -> EngineResponse:
-    """
-    Query the Google Scholar SerpApi engine and return trimmed paper results.
-
-    * **success** — ``true`` if the call succeeded.
-    * **results** — list of trimmed paper objects (title, authors, year, cited_by_count …).
-    * **error** — present only when ``success`` is ``false``.
-    """
+    """Query the Google Scholar SerpApi engine and return trimmed paper results."""
     return search_scholar(body.query, num_results=body.num_results)
 
 
 @app.post("/engines/local", response_model=EngineResponse, tags=["Engines"])
 async def local_search(body: ShoppingRequest) -> EngineResponse:
-    """
-    Query the Google Local SerpApi engine and return trimmed business results.
-
-    * **success** — ``true`` if the call succeeded.
-    * **results** — list of trimmed place objects (title, address, rating, type …).
-    * **error** — present only when ``success`` is ``false``.
-    """
+    """Query the Google Local SerpApi engine and return trimmed business results."""
     return search_local(body.query, num_results=body.num_results)
 
 
 @app.post("/engines/patents", response_model=EngineResponse, tags=["Engines"])
 async def patents_search(body: ShoppingRequest) -> EngineResponse:
-    """
-    Query the Google Patents SerpApi engine and return trimmed patent records.
-
-    * **success** — ``true`` if the call succeeded.
-    * **results** — list of trimmed patent objects (title, inventor, assignee, filing_date …).
-    * **error** — present only when ``success`` is ``false``.
-    """
+    """Query the Google Patents SerpApi engine and return trimmed patent records."""
     return search_patents(body.query, num_results=body.num_results)
 
 
@@ -183,12 +166,7 @@ async def patents_search(body: ShoppingRequest) -> EngineResponse:
 
 @app.post("/classify", response_model=ClassifyResponse, tags=["Classifier"])
 async def classify_query(body: ClassifyRequest, request: Request) -> ClassifyResponse:
-    """
-    Classify a natural-language query and return per-engine confidence scores.
-
-    * **scores** — cosine-similarity score for each of the 5 engine categories.
-    * **top_2** — the two highest-scoring categories, sorted descending.
-    """
+    """Classify a natural-language query and return per-engine confidence scores."""
     centroids = request.app.state.centroids
 
     t0 = time.perf_counter()
@@ -225,15 +203,78 @@ async def demo_search(body: DemoSearchRequest) -> dict:
 
 @app.get("/demo/examples", tags=["Demo"])
 async def demo_examples() -> list[dict[str, str]]:
-    """
-    Return 5 representative example queries for the UI chips.
-
-    Each item has ``label`` (display name) and ``query`` (the actual query string).
-    """
+    """Return 5 representative example queries for the UI chips."""
     return [
-        {"label": "Shopping",    "query": "iPhone 15 prices"},
-        {"label": "Scholar",     "query": "recent quantum computing breakthroughs"},
-        {"label": "Dual-route",  "query": "compare iPhone 15 prices with recent reviews"},
-        {"label": "Local",       "query": "best coffee shops in Chennai"},
-        {"label": "Fallback",    "query": "who is the president"},
+        {"label": "Shopping",   "query": "iPhone 15 prices"},
+        {"label": "Scholar",    "query": "recent quantum computing breakthroughs"},
+        {"label": "Dual-route", "query": "compare iPhone 15 prices with recent reviews"},
+        {"label": "Local",      "query": "best coffee shops in Chennai"},
+        {"label": "Fallback",   "query": "who is the president"},
     ]
+
+
+# ---------------------------------------------------------------------------
+# Endpoints — Benchmarks (Phase 14)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/demo/benchmarks/tokens", tags=["Benchmarks"])
+def benchmark_tokens(refresh: bool = False) -> dict:
+    """
+    Return cached token comparison benchmark result.
+
+    Computes on first call and caches to disk. Subsequent calls are instant.
+    Pass ``?refresh=true`` to force recomputation.
+    """
+    from app.demo.benchmark_store import get_token_benchmark
+    return get_token_benchmark(refresh=refresh)
+
+
+@app.get("/demo/benchmarks/accuracy", tags=["Benchmarks"])
+def benchmark_accuracy(refresh: bool = False) -> dict:
+    """
+    Return cached routing-accuracy benchmark result.
+
+    Computes on first call (loads embedding model — ~30 s).
+    Subsequent calls are instant. Pass ``?refresh=true`` to force recomputation.
+    """
+    from app.demo.benchmark_store import get_accuracy_benchmark
+    return get_accuracy_benchmark(refresh=refresh)
+
+
+@app.get("/demo/benchmarks/latency", tags=["Benchmarks"])
+async def benchmark_latency(refresh: bool = False) -> dict:
+    """
+    Return cached latency benchmark result.
+
+    If no cache exists and ``refresh=false`` (default), returns
+    ``{"available": false}`` — no SerpApi calls are made.
+
+    ``refresh=true`` runs the live benchmark (real SerpApi calls, consumes
+    quota) and is only permitted when ``ALLOW_LIVE_BENCHMARKS=true``.
+    """
+    if refresh and os.getenv("ALLOW_LIVE_BENCHMARKS") != "true":
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Live latency benchmark is disabled. "
+                "Set ALLOW_LIVE_BENCHMARKS=true to enable."
+            ),
+        )
+    from app.demo.benchmark_store import get_latency_benchmark
+    return await get_latency_benchmark(refresh=refresh)
+
+
+@app.get("/demo/benchmarks/tool-schemas", tags=["Benchmarks"])
+def benchmark_tool_schemas() -> dict:
+    """
+    Return the 20 mock engine schemas and the Universal_Search schema.
+
+    Used by the UI's "Show what was counted" expandable section.
+    """
+    from app.testing.mock_tool_schemas import TWENTY_ENGINE_SCHEMAS, UNIVERSAL_SEARCH_SCHEMA
+    return {
+        "twenty_schemas": TWENTY_ENGINE_SCHEMAS,
+        "universal_schema": UNIVERSAL_SEARCH_SCHEMA,
+        "count": len(TWENTY_ENGINE_SCHEMAS),
+    }

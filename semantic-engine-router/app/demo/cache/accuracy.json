@@ -1,0 +1,518 @@
+{
+  "overall_accuracy": 58.5,
+  "total": 53,
+  "total_correct": 31,
+  "per_category": {
+    "shopping": {
+      "total": 8,
+      "correct": 7,
+      "wrong": 1,
+      "accuracy": 87.5
+    },
+    "scholar": {
+      "total": 8,
+      "correct": 4,
+      "wrong": 4,
+      "accuracy": 50.0
+    },
+    "local": {
+      "total": 8,
+      "correct": 5,
+      "wrong": 3,
+      "accuracy": 62.5
+    },
+    "patents": {
+      "total": 8,
+      "correct": 7,
+      "wrong": 1,
+      "accuracy": 87.5
+    },
+    "search": {
+      "total": 8,
+      "correct": 0,
+      "wrong": 8,
+      "accuracy": 0.0
+    },
+    "dual": {
+      "total": 8,
+      "correct": 4,
+      "wrong": 4,
+      "accuracy": 50.0
+    },
+    "fallback": {
+      "total": 5,
+      "correct": 4,
+      "wrong": 1,
+      "accuracy": 80.0
+    }
+  },
+  "misses": [
+    {
+      "query": "do clinical trials support using red light therapy devices sold on Amazon",
+      "expected_mode": "single",
+      "expected": "shopping",
+      "actual_mode": "dual",
+      "actual": [
+        "patents",
+        "shopping"
+      ],
+      "top_scores": [
+        [
+          "patents",
+          0.3199321925640106
+        ],
+        [
+          "shopping",
+          0.23567405343055725
+        ]
+      ],
+      "notes": "Framing references clinical trials (scholar signal) but intent is purchase validation; purchase language ('sold on Amazon') should dominate."
+    },
+    {
+      "query": "systematic review on ketogenic diet and epilepsy seizure reduction in children",
+      "expected_mode": "single",
+      "expected": "scholar",
+      "actual_mode": "fallback",
+      "actual": [
+        "search"
+      ],
+      "top_scores": [
+        [
+          "scholar",
+          0.1479313224554062
+        ],
+        [
+          "shopping",
+          0.07862647622823715
+        ]
+      ],
+      "notes": ""
+    },
+    {
+      "query": "preprint on vision transformers outperforming CNNs on medical image segmentation",
+      "expected_mode": "single",
+      "expected": "scholar",
+      "actual_mode": "fallback",
+      "actual": [
+        "search"
+      ],
+      "top_scores": [
+        [
+          "scholar",
+          0.1019725576043129
+        ],
+        [
+          "shopping",
+          0.07618147879838943
+        ]
+      ],
+      "notes": ""
+    },
+    {
+      "query": "what are scientists currently saying about the health risks of ultraprocessed foods",
+      "expected_mode": "single",
+      "expected": "scholar",
+      "actual_mode": "dual",
+      "actual": [
+        "scholar",
+        "patents"
+      ],
+      "top_scores": [
+        [
+          "scholar",
+          0.2327236831188202
+        ],
+        [
+          "patents",
+          0.1826399862766266
+        ]
+      ],
+      "notes": "Phrased as a general question ('what are scientists saying') which could score as search; however 'scientists' and research framing should push it to scholar."
+    },
+    {
+      "query": "evidence-based guidelines published by WHO on screen time limits for toddlers",
+      "expected_mode": "single",
+      "expected": "scholar",
+      "actual_mode": "fallback",
+      "actual": [
+        "search"
+      ],
+      "top_scores": [
+        [
+          "scholar",
+          0.16982674598693848
+        ],
+        [
+          "patents",
+          0.13405779004096985
+        ]
+      ],
+      "notes": "'WHO guidelines' has an institutional search feel, but 'evidence-based' + 'published' anchors it to academic literature lookup."
+    },
+    {
+      "query": "nearest EV charging station compatible with Hyundai Ioniq 6",
+      "expected_mode": "single",
+      "expected": "local",
+      "actual_mode": "dual",
+      "actual": [
+        "local",
+        "shopping"
+      ],
+      "top_scores": [
+        [
+          "local",
+          0.2800544798374176
+        ],
+        [
+          "shopping",
+          0.2344505786895752
+        ]
+      ],
+      "notes": ""
+    },
+    {
+      "query": "pediatric dentist accepting BlueCross insurance near zip code 94105",
+      "expected_mode": "single",
+      "expected": "local",
+      "actual_mode": "dual",
+      "actual": [
+        "local",
+        "shopping"
+      ],
+      "top_scores": [
+        [
+          "local",
+          0.2780683636665344
+        ],
+        [
+          "shopping",
+          0.18333783745765686
+        ]
+      ],
+      "notes": ""
+    },
+    {
+      "query": "compare membership prices at Planet Fitness and LA Fitness near me",
+      "expected_mode": "single",
+      "expected": "local",
+      "actual_mode": "dual",
+      "actual": [
+        "shopping",
+        "local"
+      ],
+      "top_scores": [
+        [
+          "shopping",
+          0.4181438684463501
+        ],
+        [
+          "local",
+          0.3518793284893036
+        ]
+      ],
+      "notes": "Pricing comparison has shopping signal, but 'near me' and gym-specific context makes local lookup the right call."
+    },
+    {
+      "query": "technical papers filed with USPTO on machine learning model compression methods",
+      "expected_mode": "single",
+      "expected": "patents",
+      "actual_mode": "single",
+      "actual": [
+        "scholar"
+      ],
+      "top_scores": [
+        [
+          "scholar",
+          0.45826494693756104
+        ],
+        [
+          "patents",
+          0.2339744120836258
+        ]
+      ],
+      "notes": "'Technical papers' overlaps with scholar, but 'filed with USPTO' is an unambiguous patent-office context that overrides the academic framing."
+    },
+    {
+      "query": "what is the difference between a republic and a democracy",
+      "expected_mode": "single",
+      "expected": "search",
+      "actual_mode": "fallback",
+      "actual": [
+        "search"
+      ],
+      "top_scores": [
+        [
+          "search",
+          0.1305100917816162
+        ],
+        [
+          "shopping",
+          -0.00481627881526947
+        ]
+      ],
+      "notes": ""
+    },
+    {
+      "query": "how does a jet engine generate thrust",
+      "expected_mode": "single",
+      "expected": "search",
+      "actual_mode": "fallback",
+      "actual": [
+        "search"
+      ],
+      "top_scores": [
+        [
+          "search",
+          0.19660712778568268
+        ],
+        [
+          "scholar",
+          0.05417517572641373
+        ]
+      ],
+      "notes": ""
+    },
+    {
+      "query": "who wrote the novel 1984 and what is it about",
+      "expected_mode": "single",
+      "expected": "search",
+      "actual_mode": "dual",
+      "actual": [
+        "scholar",
+        "search"
+      ],
+      "top_scores": [
+        [
+          "scholar",
+          0.20832756161689758
+        ],
+        [
+          "search",
+          0.1800079047679901
+        ]
+      ],
+      "notes": ""
+    },
+    {
+      "query": "what caused the 2008 global financial crisis",
+      "expected_mode": "single",
+      "expected": "search",
+      "actual_mode": "dual",
+      "actual": [
+        "search",
+        "scholar"
+      ],
+      "top_scores": [
+        [
+          "search",
+          0.24305155873298645
+        ],
+        [
+          "scholar",
+          0.11160629987716675
+        ]
+      ],
+      "notes": ""
+    },
+    {
+      "query": "summary of the Treaty of Westphalia and its significance",
+      "expected_mode": "single",
+      "expected": "search",
+      "actual_mode": "fallback",
+      "actual": [
+        "search"
+      ],
+      "top_scores": [
+        [
+          "search",
+          0.1402980536222458
+        ],
+        [
+          "scholar",
+          0.03936801105737686
+        ]
+      ],
+      "notes": ""
+    },
+    {
+      "query": "how many calories does an average adult need per day",
+      "expected_mode": "single",
+      "expected": "search",
+      "actual_mode": "fallback",
+      "actual": [
+        "search"
+      ],
+      "top_scores": [
+        [
+          "search",
+          0.05584423989057541
+        ],
+        [
+          "shopping",
+          0.022607680410146713
+        ]
+      ],
+      "notes": ""
+    },
+    {
+      "query": "latest updates on the James Webb Space Telescope discoveries this year",
+      "expected_mode": "single",
+      "expected": "search",
+      "actual_mode": "dual",
+      "actual": [
+        "scholar",
+        "patents"
+      ],
+      "top_scores": [
+        [
+          "scholar",
+          0.2763056755065918
+        ],
+        [
+          "patents",
+          0.21152406930923462
+        ]
+      ],
+      "notes": "'Discoveries' has a scholar feel, but 'latest updates this year' signals a news/general-web lookup rather than academic literature."
+    },
+    {
+      "query": "is artificial general intelligence close to being achieved",
+      "expected_mode": "single",
+      "expected": "search",
+      "actual_mode": "dual",
+      "actual": [
+        "scholar",
+        "patents"
+      ],
+      "top_scores": [
+        [
+          "scholar",
+          0.30806758999824524
+        ],
+        [
+          "patents",
+          0.24193117022514343
+        ]
+      ],
+      "notes": "Topic overlaps with scholar (AI safety papers) but the question is general-web / opinion-aggregation in intent, not literature retrieval."
+    },
+    {
+      "query": "published papers and patent filings on solid-state battery electrolyte design",
+      "expected_mode": "dual",
+      "expected": [
+        "patents",
+        "scholar"
+      ],
+      "actual_mode": "single",
+      "actual": [
+        "patents"
+      ],
+      "top_scores": [
+        [
+          "patents",
+          0.5176845788955688
+        ],
+        [
+          "scholar",
+          0.2695438861846924
+        ]
+      ],
+      "notes": "'Patent filings' \u2192 patents; 'published papers' \u2192 scholar. Explicitly requests both literatures."
+    },
+    {
+      "query": "who invented CRISPR \u2014 research papers and patent ownership landscape",
+      "expected_mode": "dual",
+      "expected": [
+        "patents",
+        "scholar"
+      ],
+      "actual_mode": "single",
+      "actual": [
+        "patents"
+      ],
+      "top_scores": [
+        [
+          "patents",
+          0.638892650604248
+        ],
+        [
+          "scholar",
+          0.38506782054901123
+        ]
+      ],
+      "notes": "'Research papers' \u2192 scholar; 'patent ownership' \u2192 patents. Both dimensions are explicitly requested."
+    },
+    {
+      "query": "academic performance benchmarks and market pricing analysis of the M3 MacBook Pro",
+      "expected_mode": "dual",
+      "expected": [
+        "shopping",
+        "scholar"
+      ],
+      "actual_mode": "single",
+      "actual": [
+        "shopping"
+      ],
+      "top_scores": [
+        [
+          "shopping",
+          0.48482745885849
+        ],
+        [
+          "scholar",
+          0.16173052787780762
+        ]
+      ],
+      "notes": "'Market pricing' \u2192 shopping; 'academic performance benchmarks' \u2192 scholar. Rare example of product being referenced in academic context."
+    },
+    {
+      "query": "explain the differences between OLED and QLED TVs and which one is worth buying",
+      "expected_mode": "dual",
+      "expected": [
+        "shopping",
+        "search"
+      ],
+      "actual_mode": "single",
+      "actual": [
+        "shopping"
+      ],
+      "top_scores": [
+        [
+          "shopping",
+          0.3223338723182678
+        ],
+        [
+          "patents",
+          0.10455244779586792
+        ]
+      ],
+      "notes": "'Worth buying' \u2192 shopping; 'explain the differences' \u2192 search/general. Note: at MIN_CONFIDENCE_THRESHOLD=0.35 this may fall into fallback if shopping score dips below threshold on some embeddings."
+    },
+    {
+      "query": "how many days until Christmas 2025",
+      "expected_mode": "fallback",
+      "expected": "search",
+      "actual_mode": "single",
+      "actual": [
+        "search"
+      ],
+      "top_scores": [
+        [
+          "search",
+          0.28647005558013916
+        ],
+        [
+          "shopping",
+          0.1213415265083313
+        ]
+      ],
+      "notes": "Date arithmetic / countdown \u2014 definitively a general search answer-box query."
+    }
+  ],
+  "meta": {
+    "MIN_CONFIDENCE_THRESHOLD": 0.2,
+    "DUAL_ROUTE_THRESHOLD": 0.15,
+    "elapsed_s": 22.565
+  },
+  "generated_at": "2026-10-19T09:22:12.304285+00:00"
+}

@@ -59,3 +59,76 @@ export interface ExampleQuery {
   label: string;
   query: string;
 }
+
+// ── Phase 14: Benchmark types ────────────────────────────────────────────
+
+export interface TokenBreakdownEntry {
+  name:   string;
+  tokens: number;
+}
+
+export interface TokenBenchmark {
+  tokens_20_tools:   number;
+  tokens_1_tool:     number;
+  tokens_saved:      number;
+  percent_reduction: number;
+  tool_count_20:     number;
+  breakdown:         TokenBreakdownEntry[];
+  generated_at:      string;
+}
+
+export interface PerCategoryAccuracy {
+  total:    number;
+  correct:  number;
+  wrong:    number;
+  accuracy: number;
+}
+
+export interface MissEntry {
+  query:             string;
+  expected_mode:     string;
+  expected_category: string | null;
+  actual_mode:       string;
+  actual_category:   string | null;
+}
+
+export interface AccuracyBenchmark {
+  overall_accuracy: number;
+  per_category:     Record<string, PerCategoryAccuracy>;
+  misses:           MissEntry[];
+  total:            number;
+  total_correct:    number;
+  meta:             Record<string, unknown>;
+  generated_at:     string;
+}
+
+export interface LatencyStats {
+  min:    number;
+  mean:   number;
+  median: number;
+  max:    number;
+  count:  number;
+}
+
+export interface LatencyBenchmark {
+  available:                  boolean;
+  message?:                   string;
+  classification_overhead_ms?: LatencyStats;
+  single?:                    LatencyStats;
+  dual?:                      LatencyStats;
+  fallback?:                  LatencyStats;
+  meta?:                      Record<string, unknown>;
+  generated_at?:              string;
+}
+
+export interface ToolSchema {
+  name:        string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
+export interface ToolSchemasResult {
+  twenty_schemas:   ToolSchema[];
+  universal_schema: ToolSchema;
+  count:            number;
+}

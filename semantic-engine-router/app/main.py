@@ -3,12 +3,13 @@ app/main.py
 ===========
 FastAPI application entry point for the Semantic Engine Router.
 
-Phase 2 additions
------------------
-* FastAPI ``lifespan`` context manager loads centroid vectors once at
-  server startup and stores them on ``app.state.centroids``.
-* POST /classify endpoint accepts a query string and returns per-engine
-  confidence scores plus the top-2 ranked categories.
+Phase 13 additions
+------------------
+* CORS middleware for the Vite dev server (default http://localhost:5173).
+  Configure allowed origins via the DEMO_CORS_ORIGINS env var
+  (comma-separated list, e.g. "http://localhost:5173,https://my-demo.example.com").
+* POST /demo/search   — full pipeline + routing metadata for the UI.
+* GET  /demo/examples — 5 example queries to populate the UI chips.
 
 Run with:
     uvicorn app.main:app --reload
@@ -17,11 +18,13 @@ Run with:
 from __future__ import annotations
 
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.config import settings  # noqa: F401  — validates SERPAPI_KEY at startup
@@ -32,6 +35,7 @@ from app.engines.local import search_local
 from app.engines.patents import search_patents
 from app.classifier.classify import classify, classify_top
 from app.schemas import EngineResponse
+from app.demo.service import run_demo_query
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,7 +56,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.centroids = load_centroids()
     logger.info("Lifespan: centroids ready (%d categories).", len(app.state.centroids))
     yield
-    # Nothing to clean up on shutdown in Phase 2.
 
 
 # ---------------------------------------------------------------------------
@@ -66,10 +69,24 @@ app = FastAPI(
         "MCP-native routing layer that maps natural-language queries to the "
         "correct SerpApi engine via a lightweight semantic classifier."
     ),
-    version="0.2.0",
+    version="0.13.0",
     lifespan=lifespan,
 )
 
+# ---------------------------------------------------------------------------
+# CORS — allow the Vite dev server and any extra origins from env
+# ---------------------------------------------------------------------------
+
+_raw_origins = os.getenv("DEMO_CORS_ORIGINS", "http://localhost:5173")
+_allowed_origins: list[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ---------------------------------------------------------------------------
 # Pydantic I/O models
@@ -91,8 +108,12 @@ class ClassifyResponse(BaseModel):
     top_2: list[tuple[str, float]]
 
 
+class DemoSearchRequest(BaseModel):
+    query: str
+
+
 # ---------------------------------------------------------------------------
-# Endpoints
+# Endpoints — Meta
 # ---------------------------------------------------------------------------
 
 
@@ -100,6 +121,11 @@ class ClassifyResponse(BaseModel):
 async def health_check() -> dict[str, str]:
     """Liveness probe — returns HTTP 200 when the service is up."""
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Endpoints — Engines
+# ---------------------------------------------------------------------------
 
 
 @app.post("/engines/shopping", response_model=EngineResponse, tags=["Engines"])
@@ -150,6 +176,11 @@ async def patents_search(body: ShoppingRequest) -> EngineResponse:
     return search_patents(body.query, num_results=body.num_results)
 
 
+# ---------------------------------------------------------------------------
+# Endpoints — Classifier
+# ---------------------------------------------------------------------------
+
+
 @app.post("/classify", response_model=ClassifyResponse, tags=["Classifier"])
 async def classify_query(body: ClassifyRequest, request: Request) -> ClassifyResponse:
     """
@@ -174,3 +205,35 @@ async def classify_query(body: ClassifyRequest, request: Request) -> ClassifyRes
     )
 
     return ClassifyResponse(query=body.query, scores=scores, top_2=top_2)
+
+
+# ---------------------------------------------------------------------------
+# Endpoints — Demo (Phase 13)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/demo/search", tags=["Demo"])
+async def demo_search(body: DemoSearchRequest) -> dict:
+    """
+    Run the full routing pipeline and return everything the UI needs.
+
+    Returns classification scores for all 5 engines, the routing decision,
+    engine results, and split timing data (classification vs engine-call ms).
+    """
+    return await run_demo_query(body.query)
+
+
+@app.get("/demo/examples", tags=["Demo"])
+async def demo_examples() -> list[dict[str, str]]:
+    """
+    Return 5 representative example queries for the UI chips.
+
+    Each item has ``label`` (display name) and ``query`` (the actual query string).
+    """
+    return [
+        {"label": "Shopping",    "query": "iPhone 15 prices"},
+        {"label": "Scholar",     "query": "recent quantum computing breakthroughs"},
+        {"label": "Dual-route",  "query": "compare iPhone 15 prices with recent reviews"},
+        {"label": "Local",       "query": "best coffee shops in Chennai"},
+        {"label": "Fallback",    "query": "who is the president"},
+    ]

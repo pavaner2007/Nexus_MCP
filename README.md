@@ -1,5 +1,7 @@
 # Semantic Engine Router
 
+> **SerpApi India Hackathon 2026 — Phase 13**
+
 ## What Is This?
 
 **Semantic Engine Router** is an MCP-native routing layer that sits between LLM agents and the SerpApi ecosystem. Instead of exposing 15–20 separate SerpApi engine tools to an LLM, this project exposes **one tool** (`Universal_Search`) and uses a lightweight embedding-based semantic classifier to route each natural-language query to the correct SerpApi engine internally.
@@ -39,7 +41,9 @@ semantic-engine-router/
 │   │   ├── patents.py          # Google Patents engine → EngineResponse
 │   │   └── fallback.py         # Base Google Search fallback → EngineResponse
 │   ├── routing/
-│   │   └── router.py           # decide_route() + async execute_route()
+│   │   └── router.py                # decide_route() + async execute_route()
+│   ├── demo/
+│   │   └── service.py               # Phase 13: run_demo_query() — full pipeline in one call
 │   ├── testing/
 │   │   ├── eval_dataset.py          # 53-entry hand-labeled FULL_EVAL_SET
 │   │   ├── benchmark_accuracy.py    # Phase 11: routing accuracy benchmark CLI
@@ -47,25 +51,43 @@ semantic-engine-router/
 │   │   ├── benchmark_tokens.py      # Phase 12A: token-reduction benchmark CLI
 │   │   └── benchmark_latency.py     # Phase 12B: async latency benchmark CLI
 │   └── mcp/
-│       ├── server.py           # FastMCP server — Universal_Search tool
-│       └── __main__.py         # Entry point: python -m app.mcp
+│       ├── server.py                # FastMCP server — Universal_Search tool
+│       └── __main__.py              # Entry point: python -m app.mcp
+├── frontend/                        # Phase 13: Vite + React + TS + Tailwind demo UI
+│   ├── src/
+│   │   ├── types.ts                 # TypeScript types mirroring backend DemoResult shape
+│   │   ├── api.ts                   # Axios client (reads VITE_API_URL)
+│   │   ├── App.tsx                  # Main page: header + query bar + panels
+│   │   ├── main.tsx                 # TanStack QueryClientProvider entry point
+│   │   ├── index.css                # Tailwind + Google Fonts
+│   │   └── components/
+│   │       ├── QueryBar.tsx         # Search input + example chips
+│   │       ├── ScoreBars.tsx        # 5 confidence bars + threshold marker
+│   │       ├── RouteBadge.tsx       # SINGLE / DUAL / FALLBACK badge + explanation
+│   │       ├── TimingsStrip.tsx     # Classification / engine-call / total ms pills
+│   │       ├── ResultCard.tsx       # Engine-specific metadata rendering
+│   │       └── RawJson.tsx          # Collapsible raw JSON inspector
+│   ├── .env.example
+│   ├── tailwind.config.js
+│   └── package.json
 ├── tests/
-│   ├── conftest.py             # Injects dummy SERPAPI_KEY for test runs
-│   ├── test_health.py          # /health endpoint smoke test
-│   ├── test_seed_data.py       # Validates SEED_PHRASES structure
-│   ├── test_classifier.py      # Centroid shape, per-engine accuracy, /classify endpoint
-│   ├── test_adapters.py        # Pure unit tests for all 4 adapter functions
-│   ├── test_shopping_engine.py # Shopping engine — mocked + live tests
-│   ├── test_scholar_engine.py  # Scholar engine — mocked + live tests
-│   ├── test_local_engine.py    # Local engine — mocked + live tests
-│   ├── test_patents_engine.py  # Patents engine — mocked + live tests
-│   ├── test_fallback_engine.py # Fallback search engine — mocked + live tests
-│   ├── test_router.py          # decide_route + execute_route (single/dual/fallback)
-│   ├── test_mcp_handler.py     # Universal_Search routing — single/dual/fallback
-│   ├── test_eval_dataset.py    # 228 structural assertions on FULL_EVAL_SET
-│   ├── test_benchmark_accuracy.py  # Benchmark return-shape + accounting integrity
-│   ├── test_benchmark_tokens.py    # Token count + >80% reduction assertion
-│   └── test_benchmark_latency.py   # Mocked latency benchmark smoke tests
+│   ├── conftest.py
+│   ├── test_health.py
+│   ├── test_seed_data.py
+│   ├── test_classifier.py
+│   ├── test_adapters.py
+│   ├── test_shopping_engine.py
+│   ├── test_scholar_engine.py
+│   ├── test_local_engine.py
+│   ├── test_patents_engine.py
+│   ├── test_fallback_engine.py
+│   ├── test_router.py
+│   ├── test_mcp_handler.py
+│   ├── test_eval_dataset.py
+│   ├── test_benchmark_accuracy.py
+│   ├── test_benchmark_tokens.py
+│   ├── test_benchmark_latency.py
+│   └── test_demo_service.py         # Phase 13: 21 mocked tests for run_demo_query()
 ├── pytest.ini                  # Registers 'live' marker, suppresses warnings
 ├── .env.example
 ├── .gitignore
@@ -464,6 +486,7 @@ Runs all 53 `FULL_EVAL_SET` queries through the real classifier + router pipelin
 | **10** ✅ | Hand-labeled eval dataset — 53 queries across 3 routing modes — 497 tests                        |
 | **11** ✅ | Routing-accuracy benchmark — 58.5% baseline, threshold calibrated 0.35→0.20 — 514 tests          |
 | **12** ✅ | Token + latency benchmarks — 97.4% token reduction, async latency across all 3 modes — 544 tests |
+| **13** ✅ | Live demo UI — React + Vite + Tailwind, `/demo/search` + `/demo/examples`, confidence bars with threshold marker — 565 tests |
 
 ---
 
